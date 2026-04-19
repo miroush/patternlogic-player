@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://patternlogic.vercel.app/pattern.schema.json",
+  "title": "PatternLogic Pattern",
+  "description": "Jeden rytmický pattern pro kytarový sekvenátor PatternLogic.",
+  "version": "1",
+  "type": "object",
+  "required": ["id", "meta", "steps"],
+
+  "properties": {
+
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Unikátní identifikátor patternu. Snake_case, jen malá písmena, číslice a podtržítka.",
+      "examples": ["folk_alternating_bass", "waltz_strum", "d_du_udu"]
+    },
+
+    "meta": {
+      "type": "object",
+      "required": ["name"],
+      "description": "Metadata patternu — popisná, pro UI a filtrování.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Lidsky čitelný název patternu.",
+          "examples": ["Klidný folk", "Valčík D·DU·DU"]
+        },
+        "style": {
+          "type": "string",
+          "enum": ["strum", "fingerpick", "bass_strum"],
+          "description": "Typ hry. 'strum' = D/U tahy přes celý akord, 'fingerpick' = prstová hra (arpeggio, Travis, klasika), 'bass_strum' = bas na silnou dobu + trs na ostatní."
+        },
+        "feel": {
+          "type": "string",
+          "enum": ["straight", "swing"],
+          "description": "Rytmický feel. 'straight' = rovné osminky, 'swing' = tripolový swing."
+        },
+        "time_signature": {
+          "type": "string",
+          "enum": ["4/4", "3/4"],
+          "default": "4/4",
+          "description": "Taktové označení. Pokud chybí, předpokládá se 4/4."
+        },
+        "genre": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Seznam žánrů pro filtrování v knihovně.",
+          "examples": [["folk", "pop"], ["waltz", "country", "folk"]]
+        },
+        "bpm_range": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 20, "maximum": 300 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Doporučený rozsah temp [min, max] v BPM.",
+          "examples": [[60, 120], [100, 180]]
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "description": "Obtížnost: 1 = začátečník, 2 = mírně pokročilý, 3 = pokročilý."
+        },
+        "description": {
+          "type": "string",
+          "description": "Volný text popisující pattern, styl, charakteristiku, reference na interprety."
+        },
+        "instrument": {
+          "type": "string",
+          "enum": ["guitar", "piano", "universal"],
+          "default": "guitar",
+          "description": "Cílový nástroj patternu. 'guitar' = kytarové patterny (barre voicing, strum delay). 'piano' = klavírní patterny (jiný voicing engine). 'universal' = funguje s oběma. Pokud chybí, předpokládá se 'guitar'."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "loop_steps": {
+      "type": "integer",
+      "enum": [12, 16],
+      "default": 16,
+      "description": "Délka smyčky v krocích (16. notách). 16 = jeden takt 4/4, 12 = jeden takt 3/4. Pokud chybí, použije se 16."
+    },
+
+    "edit_bpm": {
+      "type": "number",
+      "minimum": 20,
+      "maximum": 300,
+      "description": "BPM, při kterém byl pattern editován. Slouží k přepočtu strum_delay_ms při jiném tempu (rmsScale = edit_bpm / playback_bpm). Pokud chybí, ms hodnoty se neškálují."
+    },
+
+    "voicing_profiles": {
+      "type": "object",
+      "description": "Definice houslového rozvržení pro E-tvarové a A-tvarové barre akordy. Pokud chybí, použijí se výchozí hodnoty (viz níže).",
+      "properties": {
+        "barre_6": {
+          "$ref": "#/definitions/voicing_profile",
+          "description": "E-tvarový barre akord — kořen na struně 6 (nízká E)."
+        },
+        "barre_5": {
+          "$ref": "#/definitions/voicing_profile",
+          "description": "A-tvarový barre akord — kořen na struně 5 (A)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "humanization": {
+      "type": "object",
+      "description": "Globální parametry humanizace pro celý pattern. Všechny hodnoty jsou výchozí — přepsat lze na úrovni jednotlivého stepu.",
+      "properties": {
+        "strum_delay_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Globální výchozí zpoždění mezi strunami při strumu (ms). Přepočítává se jako rms — viz edit_bpm."
+        },
+        "vel_variance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5,
+          "description": "Náhodná odchylka velocity (±). Přičítá se k vel každého notu pro přirozený zvuk."
+        },
+        "default_duration": {
+          "type": "string",
+          "description": "Výchozí délka pro všechny noty, pokud step nemá explicitní duration. Použije se místo heuristiky.",
+          "$ref": "#/definitions/duration_value"
+        },
+        "default_single_duration": {
+          "type": "string",
+          "description": "Výchozí délka pro stepy s jedinou strunou. 'ring' = nota zní až do příštího výskytu té struny.",
+          "enum": ["ring", "32n", "16n", "8n", "4n", "2n", "1n"]
+        },
+        "palm_mute_duration": {
+          "type": "string",
+          "description": "Délka pro palm mute noty (přepíše obecný default).",
+          "$ref": "#/definitions/duration_value"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Sekvence rytmických událostí (úhozů). Každý step = jeden úhoz v taktu.",
+      "items": { "$ref": "#/definitions/step" }
+    },
+
+    "schema_version": {
+      "type": "integer",
+      "enum": [1],
+      "default": 1,
+      "description": "Verze schématu, podle které byl pattern vytvořen. Aktuální verze: 1."
+    },
+
+    "_user_id": {
+      "type": ["string", "null"],
+      "description": "Interní pole přidané serverem — UUID vlastníka z Supabase Auth. Nenastavuj ručně."
+    }
+  },
+
+  "additionalProperties": false,
+
+  "definitions": {
+
+    "voicing_profile": {
+      "type": "object",
+      "description": "Mapování abstraktních basových strun na konkrétní čísla strun (1–6).",
+      "properties": {
+        "bass_root": {
+          "type": "integer", "minimum": 1, "maximum": 6,
+          "description": "Struna kořenového basu. Výchozí: 6 pro barre_6, 5 pro barre_5."
+        },
+        "bass_alt": {
+          "type": "integer", "minimum": 1, "maximum": 6,
+          "description": "Struna střídavého basu (zpravidla kvinta). Výchozí: 5 pro barre_6, 4 pro barre_5."
+        },
+        "bass_3": {
+          "type": "integer", "minimum": 1, "maximum": 6,
+          "description": "Třetí basová struna (tercie nebo oktáva). Výchozí: 4 pro barre_6, 3 pro barre_5."
+        },
+        "available": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 6 },
+          "description": "Číselné struny dostupné pro tento tvar. Ostatní struny se přeskočí."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "string_ref": {
+      "description": "Reference na strunu. Buď abstraktní název ('bass_root', 'bass_alt', 'bass_3') nebo konkrétní číslo struny (1 = vysoká e, 6 = nízká E).",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["bass_root", "bass_alt", "bass_3"],
+          "description": "Abstraktní reference — přeloží se podle aktivního voicing profilu a tvaru akordu."
+        },
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6,
+          "description": "Přímá reference na strunu. 1 = vysoká e, 2 = B, 3 = G, 4 = D, 5 = A, 6 = nízká E."
+        }
+      ]
+    },
+
+    "beat_value": {
+      "type": "string",
+      "enum": [
+        "1","1e","1+","1a",
+        "2","2e","2+","2a",
+        "3","3e","3+","3a",
+        "4","4e","4+","4a"
+      ],
+      "description": "Pozice v taktu. Notace: číslo = čtvrtinová doba, +e = druhá 16., + = třetí 16. (osminová), +a = čtvrtá 16. Beaty 4x = jen pro 4/4."
+    },
+
+    "duration_value": {
+      "type": "string",
+      "enum": ["ring", "32n", "16n", "8n", "4n", "2n", "1n"],
+      "description": "'ring' = drž až do příštího výskytu té struny; ostatní = Tone.js notace délky noty."
+    },
+
+    "step": {
+      "type": "object",
+      "required": ["beat", "strings", "vel"],
+      "description": "Jeden rytmický úhoz.",
+      "properties": {
+        "beat": {
+          "$ref": "#/definitions/beat_value",
+          "description": "Pozice úhozu v taktu."
+        },
+        "strings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/string_ref" },
+          "description": "Struny, které se v tomto stepu zahrají. Pořadí určuje směr (down = od nízké po vysokou, up = obráceně)."
+        },
+        "vel": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Velocity (hlasitost) úhozu. 0.0 = ticho, 1.0 = plná síla. K hodnotě se přičítá vel_variance a BEAT_ACCENT."
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["D", "U"],
+          "description": "Směr úhozu. 'D' = dolů (od basů k výškám), 'U' = nahoru. Nepovinné — primárně informativní, skutečné pořadí not se odvozuje z pořadí v 'strings'."
+        },
+        "duration": {
+          "$ref": "#/definitions/duration_value",
+          "description": "Délka not tohoto stepu. Přepíše humanization.default_duration i heuristiku."
+        },
+        "technique": {
+          "type": "string",
+          "enum": ["palm_mute"],
+          "description": "Hrací technika. 'palm_mute' = dlaňové ztlumení (zkrátí délku, změní zvuk)."
+        },
+        "strum_delay_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Zpoždění mezi strunami při strumu (ms) — per-event, přepíše humanization.strum_delay_ms. Hodnota je tempo-relativní (rms) a přepočítá se při jiném tempu než edit_bpm."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

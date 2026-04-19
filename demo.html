@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>patternlogic-player — demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1   { margin-bottom: 0.25rem; }
+    .sub { color: #666; margin-top: 0; }
+    pre  { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow: auto; }
+    .status { padding: 0.5rem 1rem; background: #e8f4fc; border-left: 4px solid #4a90e2; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>patternlogic-player</h1>
+  <p class="sub">Standalone demo — proves the library loads and exposes its API.</p>
+
+  <div class="status" id="status">Loading…</div>
+
+  <h2>What works so far</h2>
+  <ul id="checklist">
+    <li>Library import: <span id="chk-import">…</span></li>
+    <li>PatternPlayer class: <span id="chk-class">…</span></li>
+    <li>Event emitter: <span id="chk-events">…</span></li>
+  </ul>
+
+  <h2>Pattern format reference</h2>
+  <p>See <a href="./pattern.schema.json">pattern.schema.json</a>.</p>
+
+  <h2>Next milestones</h2>
+  <p>This demo will grow as the refactor progresses:</p>
+  <ul>
+    <li><strong>Step 1:</strong> Pure utilities (voicing, pattern compile, sequence parser)</li>
+    <li><strong>Step 2:</strong> Single-chord playback with Tone.Sampler</li>
+    <li><strong>Step 3:</strong> Chord sequence playback</li>
+    <li><strong>Step 4:</strong> Live BPM / pattern update</li>
+  </ul>
+
+  <script type="module">
+    const setStatus = (msg, ok = true) => {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.style.borderLeftColor = ok ? '#4a90e2' : '#e24a4a';
+    };
+    const check = (id, ok) => {
+      const el = document.getElementById(id);
+      el.textContent = ok ? '✓' : '✗';
+      el.style.color = ok ? 'green' : 'red';
+    };
+
+    try {
+      const mod = await import('./pattern-player.js');
+      check('chk-import', true);
+      check('chk-class', typeof mod.PatternPlayer === 'function');
+
+      // Smoke test for event emitter — create a dummy instance just to verify on/emit.
+      // We pass a fake sampler to bypass the guard; we won't actually play.
+      const dummy = new mod.PatternPlayer({ guitarSampler: {} });
+      let gotEvent = false;
+      dummy.on('test', () => { gotEvent = true; });
+      dummy.emit('test', null);
+      check('chk-events', gotEvent);
+
+      setStatus('Library loaded. No playback yet — see milestone list below.');
+    } catch (err) {
+      console.error(err);
+      setStatus('Library failed to load: ' + err.message, false);
+    }
+  </script>
+</body>
+</html>
