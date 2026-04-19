@@ -3,34 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <title>patternlogic-player — demo</title>
+  <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; }
     h1   { margin-bottom: 0.25rem; }
     .sub { color: #666; margin-top: 0; }
-    pre  { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow: auto; }
+    pre  { background: #f4f4f4; padding: 0.75rem; border-radius: 4px; overflow: auto; font-size: 12px; }
     .status { padding: 0.5rem 1rem; background: #e8f4fc; border-left: 4px solid #4a90e2; margin: 1rem 0; }
+    .ok  { color: #1a8a1a; font-weight: bold; }
+    .bad { color: #c22; font-weight: bold; }
+    h2 { margin-top: 2rem; }
+    table { border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid #eee; }
+    th { background: #f9f9f9; }
   </style>
 </head>
 <body>
   <h1>patternlogic-player</h1>
-  <p class="sub">Standalone demo — proves the library loads and exposes its API.</p>
+  <p class="sub">Standalone demo — proves pure utilities work without PatternLogic or a UI.</p>
 
   <div class="status" id="status">Loading…</div>
 
-  <h2>What works so far</h2>
-  <ul id="checklist">
+  <h2>Library shell</h2>
+  <ul>
     <li>Library import: <span id="chk-import">…</span></li>
     <li>PatternPlayer class: <span id="chk-class">…</span></li>
     <li>Event emitter: <span id="chk-events">…</span></li>
   </ul>
 
-  <h2>Pattern format reference</h2>
-  <p>See <a href="./pattern.schema.json">pattern.schema.json</a>.</p>
+  <h2>Constants (Step 1)</h2>
+  <ul>
+    <li>SHAPES has E/A × 13 qualities: <span id="chk-shapes">…</span></li>
+    <li>CHORD_OFFSETS has E/A × 13 qualities: <span id="chk-offsets">…</span></li>
+    <li>BEAT_TO_STEP has 16 entries (16n grid): <span id="chk-beat16">…</span></li>
+    <li>BEAT_TO_STEP_32 has 32 entries (32n grid): <span id="chk-beat32">…</span></li>
+    <li>BEAT_ACCENT has all 32 entries: <span id="chk-accent">…</span></li>
+  </ul>
+
+  <h2>Utility functions (Step 1)</h2>
+  <ul>
+    <li>getAllPositions(C, maj) returns both E/A shapes: <span id="chk-pos">…</span></li>
+    <li>generateVoicing produces 6 strings + bass: <span id="chk-voicing">…</span></li>
+    <li>resolveStrings maps bass_root by shape: <span id="chk-resolve">…</span></li>
+    <li>compilePattern produces grid of correct length: <span id="chk-compile">…</span></li>
+    <li>parseSequence handles C G Am F: <span id="chk-parse">…</span></li>
+    <li>parseSequence handles Am.(001e) syntax: <span id="chk-parse-full">…</span></li>
+  </ul>
+
+  <h2>Sample voicing — C major, E-shape, 8th fret</h2>
+  <pre id="voicing-dump">(computed below)</pre>
+
+  <h2>Sample sequence parse — <code>C G.. Am(001) F.(a2)</code></h2>
+  <pre id="parse-dump">(computed below)</pre>
 
   <h2>Next milestones</h2>
-  <p>This demo will grow as the refactor progresses:</p>
   <ul>
-    <li><strong>Step 1:</strong> Pure utilities (voicing, pattern compile, sequence parser)</li>
+    <li><s>Step 1: Pure utilities (voicing, pattern compile, sequence parser)</s> ✓</li>
     <li><strong>Step 2:</strong> Single-chord playback with Tone.Sampler</li>
     <li><strong>Step 3:</strong> Chord sequence playback</li>
     <li><strong>Step 4:</strong> Live BPM / pattern update</li>
@@ -42,26 +70,112 @@
       el.textContent = msg;
       el.style.borderLeftColor = ok ? '#4a90e2' : '#e24a4a';
     };
-    const check = (id, ok) => {
+    const check = (id, cond, detail = '') => {
       const el = document.getElementById(id);
-      el.textContent = ok ? '✓' : '✗';
-      el.style.color = ok ? 'green' : 'red';
+      el.textContent = (cond ? '✓' : '✗') + (detail ? ` (${detail})` : '');
+      el.className = cond ? 'ok' : 'bad';
+      return cond;
     };
 
     try {
       const mod = await import('./pattern-player.js');
-      check('chk-import', true);
-      check('chk-class', typeof mod.PatternPlayer === 'function');
+      let allOk = true;
+      const must = (id, cond, detail) => { if (!check(id, cond, detail)) allOk = false; };
 
-      // Smoke test for event emitter — create a dummy instance just to verify on/emit.
-      // We pass a fake sampler to bypass the guard; we won't actually play.
+      // Shell
+      must('chk-import', typeof mod === 'object');
+      must('chk-class', typeof mod.PatternPlayer === 'function');
       const dummy = new mod.PatternPlayer({ guitarSampler: {} });
-      let gotEvent = false;
-      dummy.on('test', () => { gotEvent = true; });
-      dummy.emit('test', null);
-      check('chk-events', gotEvent);
+      let evt = false; dummy.on('t', () => evt = true); dummy.emit('t');
+      must('chk-events', evt);
 
-      setStatus('Library loaded. No playback yet — see milestone list below.');
+      // Constants
+      must('chk-shapes',
+        mod.SHAPES?.E && mod.SHAPES?.A &&
+        Object.keys(mod.SHAPES.E).length === 13 &&
+        Object.keys(mod.SHAPES.A).length === 13
+      );
+      must('chk-offsets',
+        mod.CHORD_OFFSETS?.E && mod.CHORD_OFFSETS?.A &&
+        Object.keys(mod.CHORD_OFFSETS.E).length === 13
+      );
+      must('chk-beat16', Object.keys(mod.BEAT_TO_STEP).length === 16);
+      must('chk-beat32', Object.keys(mod.BEAT_TO_STEP_32).length === 32);
+      must('chk-accent', Object.keys(mod.BEAT_ACCENT).length === 32);
+
+      // getAllPositions
+      const positions = mod.getAllPositions({ root: 'C', quality: 'maj' });
+      must('chk-pos',
+        positions.length >= 2 &&
+        positions.some(p => p.shape === 'E') &&
+        positions.some(p => p.shape === 'A'),
+        `found ${positions.length} positions`
+      );
+
+      // generateVoicing — use the E-shape C major position (barre fret 8)
+      const eCmaj = positions.find(p => p.shape === 'E' && p.barFret === 8);
+      const voicing = mod.generateVoicing(eCmaj, 'maj');
+      const voicingKeysOk = [1,2,3,4,5,6,'bass_root','bass_alt'].every(k => voicing[k]);
+      must('chk-voicing', voicingKeysOk, `string 1 = ${voicing[1]}`);
+      document.getElementById('voicing-dump').textContent = JSON.stringify(voicing, null, 2);
+
+      // resolveStrings — E-shape: bass_root=6, A-shape: bass_root=5
+      const eResolved = mod.resolveStrings(['bass_root', 'bass_alt', 3], 'E');
+      const aResolved = mod.resolveStrings(['bass_root', 'bass_alt', 3], 'A');
+      must('chk-resolve',
+        eResolved[0] === 6 && eResolved[1] === 5 &&
+        aResolved[0] === 5 && aResolved[1] === 4,
+        `E: ${eResolved.join(',')} | A: ${aResolved.join(',')}`
+      );
+
+      // compilePattern
+      const samplePat = {
+        loop_steps: 16,
+        resolution: '16n',
+        meta: { style: 'strum' },
+        steps: [
+          { beat: '1', strings: ['bass_root',4,3,2,1], duration: '4n' },
+          { beat: '3', strings: ['bass_alt',4,3,2,1], duration: '4n' }
+        ]
+      };
+      const compiled = mod.compilePattern(samplePat);
+      must('chk-compile',
+        compiled.loopLen === 16 &&
+        compiled.grid.length === 16 &&
+        compiled.grid[0].length === 1 &&
+        compiled.grid[8].length === 1,
+        `grid len ${compiled.grid.length}`
+      );
+
+      // parseSequence — simple
+      const simple = mod.parseSequence('C G Am F');
+      must('chk-parse',
+        simple.length === 4 &&
+        simple[0].root === 'C' && simple[0].quality === 'maj' &&
+        simple[2].root === 'A' && simple[2].quality === 'min' &&
+        simple.every(c => c.beats === 4),
+        `${simple.length} chords`
+      );
+
+      // parseSequence — complex
+      const complex = mod.parseSequence('C G.. Am(001) F.(a2)', {
+        timeSignature: '4/4',
+        patNumMap: { '001': 'my-pattern-id' }
+      });
+      must('chk-parse-full',
+        complex.length === 4 &&
+        complex[1].beats === 1 &&                                 // G.. = 1 beat
+        complex[2].patternId === 'my-pattern-id' &&               // (001) lookup
+        complex[3].shape === 'A' && complex[3].shapeOctave === 2, // (a2)
+        `chord 3: ${JSON.stringify({shape: complex[3].shape, oct: complex[3].shapeOctave})}`
+      );
+      document.getElementById('parse-dump').textContent = JSON.stringify(complex, null, 2);
+
+      setStatus(allOk
+        ? '✓ All Step 1 checks passed — library ready to be consumed.'
+        : '✗ Some checks failed — see red marks above.',
+        allOk
+      );
     } catch (err) {
       console.error(err);
       setStatus('Library failed to load: ' + err.message, false);

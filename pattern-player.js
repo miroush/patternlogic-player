@@ -1,15 +1,19 @@
 // pattern-player.js
 // Reusable Tone.js-based playback engine for PatternLogic guitar patterns.
 //
-// This is the Milestone 1 scaffolding — class and method signatures are defined,
-// but implementations are pulled in gradually from PatternLogic's index.html.
+// STEP 1 (pure utilities) is implemented: voicing engine, chord positions,
+// pattern compilation, sequence parser. Steps 2–5 (playback, events, runtime
+// updates) are scaffolded but not yet implemented.
 //
-// See README.md and API.md for usage.
+// This module expects the global `Tone` to exist (Tone.js v14.x, loaded via
+// <script src="https://unpkg.com/tone/..."></script> or similar).
+//
+// See README.md for usage, pattern.schema.json for the pattern format.
 
-/**
- * Minimal event emitter used internally by PatternPlayer.
- * Consumers use player.on('step', handler) etc. to react to playback events.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Event emitter (internal, used by PatternPlayer instances)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class EventEmitter {
   constructor() { this._handlers = {}; }
   on(event, handler) {
@@ -32,54 +36,422 @@ class EventEmitter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Voicing engine constants (to be populated in Step 1)
+// Constants — E/A barre shapes and chord qualities
 // ─────────────────────────────────────────────────────────────────────────────
 
-// E/A barre shape templates — placeholder, filled in Step 1
-export const SHAPES = {};
+/** Barre fret for each root when using E-shape (string 6 = bass) */
+export const E_BASE_FRET = { E:0, F:1, 'F#':2, G:3, 'G#':4, A:5, 'A#':6, B:7, C:8, 'C#':9, D:10, 'D#':11 };
 
-// Chord quality → semitone offsets per string — placeholder
-export const CHORD_OFFSETS = {};
+/** Barre fret for each root when using A-shape (string 5 = bass) */
+export const A_BASE_FRET = { A:0, 'A#':1, B:2, C:3, 'C#':4, D:5, 'D#':6, E:7, F:8, 'F#':9, G:10, 'G#':11 };
 
-// Beat-to-step / step-to-beat mappings — placeholder
-export const BEAT_TO_STEP = {};
-export const STEP_TO_BEAT = {};
-export const BEAT_TO_STEP_32 = {};
-export const STEP_TO_BEAT_32 = {};
+/** Maximum playable barre fret (higher positions are impractical) */
+export const MAX_BARRE_FRET = 15;
 
-// Velocity accent per beat position — placeholder
-export const BEAT_ACCENT = {};
+/** Shape templates: semitone intervals per string for E/A barre forms × qualities.
+ *  Used by generateVoicing() to compute actual pitches. */
+export const SHAPES = {
+  "E": {
+    "maj" : {1:24,2:19,3:16,4:12,5:7,6:0},
+    "min" : {1:24,2:19,3:15,4:12,5:7,6:0},
+    "7"   : {1:24,2:19,3:16,4:10,5:7,6:0},
+    "maj7": {1:24,2:19,3:16,4:11,5:7,6:0},
+    "min7": {1:24,2:19,3:15,4:10,5:7,6:0},
+    "dim" : {1:24,2:21,3:15,4:12,5:6,6:0},
+    "aug" : {1:24,2:20,3:16,4:12,5:8,6:0},
+    "sus2": {1:24,2:17,3:14,4:12,5:7,6:0},
+    "sus4": {1:24,2:19,3:17,4:12,5:7,6:0},
+    "add9": {1:26,2:19,3:16,4:12,5:7,6:0},
+    "6"   : {1:21,2:19,3:16,4:12,5:7,6:0},
+    "m6"  : {1:21,2:19,3:15,4:12,5:7,6:0},
+    "9"   : {1:26,2:19,3:16,4:10,5:7,6:0}
+  },
+  "A": {
+    "maj" : {1:19,2:16,3:12,4:7,5:0,6:-5},
+    "min" : {1:19,2:15,3:12,4:7,5:0,6:-5},
+    "7"   : {1:19,2:16,3:10,4:7,5:0,6:-5},
+    "maj7": {1:19,2:16,3:11,4:7,5:0,6:-5},
+    "min7": {1:19,2:15,3:10,4:7,5:0,6:-5},
+    "dim" : {1:21,2:15,3:12,4:6,5:0,6:-5},
+    "aug" : {1:20,2:16,3:12,4:8,5:0,6:-5},
+    "sus2": {1:17,2:14,3:12,4:7,5:0,6:-5},
+    "sus4": {1:19,2:17,3:12,4:7,5:0,6:-5},
+    "add9": {1:21,2:16,3:12,4:7,5:0,6:-5},
+    "6"   : {1:16,2:16,3:12,4:7,5:0,6:-5},
+    "m6"  : {1:16,2:15,3:12,4:7,5:0,6:-5},
+    "9"   : {1:21,2:16,3:10,4:7,5:0,6:-5}
+  }
+};
 
-// Note-name normalization — placeholder
-export const FLAT_TO_SHARP = {};
-
-// Sequence parser quality map — placeholder
-export const SEQ_QUALITY_MAP = {};
+/** Fret offsets relative to barre fret (null = muted string).
+ *  Used by getAllPositions() to show where each string is played. */
+export const CHORD_OFFSETS = {
+  "E": {
+    "maj" : {6:0,5:2,4:2,3:1,2:0,1:0},
+    "min" : {6:0,5:2,4:2,3:0,2:0,1:0},
+    "7"   : {6:0,5:2,4:0,3:1,2:0,1:0},
+    "maj7": {6:0,5:2,4:1,3:1,2:0,1:0},
+    "min7": {6:0,5:2,4:0,3:0,2:0,1:0},
+    "dim" : {6:0,5:1,4:2,3:0,2:2,1:0},
+    "aug" : {6:0,5:3,4:2,3:1,2:1,1:0},
+    "sus2": {6:0,5:2,4:2,3:2,2:0,1:0},
+    "sus4": {6:0,5:2,4:2,3:2,2:3,1:0},
+    "add9": {6:0,5:2,4:2,3:1,2:0,1:2},
+    "6"   : {6:0,5:2,4:2,3:1,2:2,1:0},
+    "m6"  : {6:0,5:2,4:2,3:0,2:2,1:0},
+    "9"   : {6:0,5:2,4:0,3:1,2:0,1:2}
+  },
+  "A": {
+    "maj" : {6:null,5:0,4:2,3:2,2:2,1:0},
+    "min" : {6:null,5:0,4:2,3:2,2:1,1:0},
+    "7"   : {6:null,5:0,4:2,3:0,2:2,1:0},
+    "maj7": {6:null,5:0,4:2,3:1,2:2,1:0},
+    "min7": {6:null,5:0,4:2,3:0,2:1,1:0},
+    "dim" : {6:null,5:0,4:1,3:2,2:1,1:2},
+    "aug" : {6:null,5:0,4:3,3:2,2:2,1:1},
+    "sus2": {6:null,5:0,4:2,3:2,2:0,1:0},
+    "sus4": {6:null,5:0,4:2,3:2,2:3,1:0},
+    "add9": {6:null,5:0,4:2,3:2,2:2,1:2},
+    "6"   : {6:null,5:0,4:2,3:2,2:2,1:2},
+    "m6"  : {6:null,5:0,4:2,3:2,2:1,1:2},
+    "9"   : {6:null,5:0,4:2,3:0,2:2,1:2}
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pure utilities (no DOM, no Tone.js state) — to be filled in Step 1
+// Constants — beat grids (16n and 32n)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 16n grid: beat notation → step index (0–15). 4 steps per beat. */
+export const BEAT_TO_STEP = {
+  "1":0,"1e":1,"1+":2,"1a":3,
+  "2":4,"2e":5,"2+":6,"2a":7,
+  "3":8,"3e":9,"3+":10,"3a":11,
+  "4":12,"4e":13,"4+":14,"4a":15
+};
+/** 16n grid: step index → beat notation. */
+export const STEP_TO_BEAT = Object.fromEntries(
+  Object.entries(BEAT_TO_STEP).map(([b, s]) => [s, b])
+);
+
+/** 32n grid: beat notation → step index (0–31). 8 steps per beat.
+ *  The "." suffix marks 32nd note positions between standard 16th notes. */
+export const BEAT_TO_STEP_32 = {
+  "1":0,  "1.":1,  "1e":2,  "1e.":3,
+  "1+":4, "1+.":5, "1a":6,  "1a.":7,
+  "2":8,  "2.":9,  "2e":10, "2e.":11,
+  "2+":12,"2+.":13,"2a":14, "2a.":15,
+  "3":16, "3.":17, "3e":18, "3e.":19,
+  "3+":20,"3+.":21,"3a":22, "3a.":23,
+  "4":24, "4.":25, "4e":26, "4e.":27,
+  "4+":28,"4+.":29,"4a":30, "4a.":31
+};
+/** 32n grid: step index → beat notation. */
+export const STEP_TO_BEAT_32 = Object.fromEntries(
+  Object.entries(BEAT_TO_STEP_32).map(([b, s]) => [s, b])
+);
+
+/** Velocity accent coefficient per beat position (1.0 = full, <1.0 = softer). */
+export const BEAT_ACCENT = {
+  "1":1.00,"1.":0.78,"1e":0.82,"1e.":0.76,"1+":0.88,"1+.":0.76,"1a":0.80,"1a.":0.74,
+  "2":0.92,"2.":0.76,"2e":0.80,"2e.":0.74,"2+":0.85,"2+.":0.75,"2a":0.78,"2a.":0.73,
+  "3":0.96,"3.":0.77,"3e":0.81,"3e.":0.75,"3+":0.88,"3+.":0.76,"3a":0.79,"3a.":0.73,
+  "4":0.90,"4.":0.76,"4e":0.80,"4e.":0.74,"4+":0.82,"4+.":0.74,"4a":0.77,"4a.":0.72
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants — sequence parser
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Normalize flat note names to sharps (Tone.js prefers sharps). */
+export const FLAT_TO_SHARP = {
+  'Db':'C#', 'Eb':'D#', 'Gb':'F#', 'Ab':'G#', 'Bb':'A#', 'Cb':'B', 'Fb':'E'
+};
+
+/** Raw quality notation → internal quality key used in SHAPES / CHORD_OFFSETS. */
+export const SEQ_QUALITY_MAP = {
+  '': 'maj', 'm': 'min', '7': '7', 'maj7': 'maj7', 'min7': 'min7', 'm7': 'min7',
+  'dim': 'dim', 'aug': 'aug', 'sus2': 'sus2', 'sus4': 'sus4',
+  'add9': 'add9', '6': '6', 'm6': 'm6', '9': '9'
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure utilities — voicing
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Parse chord sequence text into array of chord descriptors.
- * Example: "C G Am(001) F.." → [{root, quality, beats, patternId, ...}, ...]
+ * Compute note names for all 6 strings + bass variants of a chord at a given position.
+ *
+ * @param {object} position - Position descriptor from getAllPositions()
+ * @param {'E'|'A'} position.shape - Barre shape
+ * @param {string}  position.baseNote - Root note (e.g. 'C3'), computed by getAllPositions()
+ * @param {string}  quality - Chord quality ('maj', 'min', '7', ...) — must be a key in SHAPES[shape]
+ * @returns {object} Voicing: { 1..6: string note names, bass_root, bass_alt }
+ *
+ * @example
+ *   const positions = getAllPositions({ root: 'C', quality: 'maj' });
+ *   const voicing = generateVoicing(positions[0], 'maj');
+ *   // { 1: 'C5', 2: 'G4', ..., bass_root: 'C3', bass_alt: 'G3' }
  */
-export function parseSequence(text, opts = {}) {
-  // Placeholder — implementation moves in Step 1
-  throw new Error('parseSequence: not yet implemented (Milestone 1 / Step 1)');
+export function generateVoicing(position, quality) {
+  if (typeof Tone === 'undefined') {
+    throw new Error('generateVoicing: Tone.js is required (global Tone not found).');
+  }
+  const iv = SHAPES[position.shape][quality];
+  if (!iv) throw new Error(`generateVoicing: unknown quality "${quality}" for shape "${position.shape}"`);
+  const base = Tone.Frequency(position.baseNote);
+  return {
+    1: base.transpose(iv[1]).toNote(),
+    2: base.transpose(iv[2]).toNote(),
+    3: base.transpose(iv[3]).toNote(),
+    4: base.transpose(iv[4]).toNote(),
+    5: base.transpose(iv[5]).toNote(),
+    6: base.transpose(iv[6]).toNote(),
+    "bass_root": position.baseNote,
+    "bass_alt":  base.transpose(7).toNote()
+  };
+}
+
+/**
+ * Resolve abstract string references (bass_root/bass_alt/bass_3) to physical string numbers (1–6)
+ * based on the current barre shape. For E-shape: bass_root=6, bass_alt=5, bass_3=4.
+ * For A-shape: bass_root=5, bass_alt=4, bass_3=3.
+ *
+ * @param {Array<number|string>} strings - Mix of numeric string numbers and abstract names
+ * @param {'E'|'A'} shape - Current barre shape
+ * @returns {Array<number>} Physical string numbers (1–6)
+ */
+export function resolveStrings(strings, shape) {
+  const bassRoot = shape === 'E' ? 6 : 5;
+  const bassAlt  = shape === 'E' ? 5 : 4;
+  const bass3    = shape === 'E' ? 4 : 3;
+  return strings.map(s =>
+    s === 'bass_root' ? bassRoot :
+    s === 'bass_alt'  ? bassAlt  :
+    s === 'bass_3'    ? bass3    : s
+  );
+}
+
+/**
+ * Get all playable barre positions for a given chord.
+ *
+ * @param {object} opts
+ * @param {string}              opts.root          - Root note ('A', 'C#', ...) — must be normalized (use FLAT_TO_SHARP to convert 'Db'→'C#' etc.)
+ * @param {string}              opts.quality       - Chord quality ('maj', 'min', '7', ...)
+ * @param {'auto'|'E'|'A'}      [opts.shapeFilter='auto'] - Filter to specific shape or return both
+ * @returns {Array<object>} Array of positions: [{ shape, barFret, frets, baseNote }, ...]
+ *                          sorted by barre fret ascending (E-shape preferred at equal fret).
+ */
+export function getAllPositions({ root, quality, shapeFilter = 'auto' }) {
+  if (typeof Tone === 'undefined') {
+    throw new Error('getAllPositions: Tone.js is required (global Tone not found).');
+  }
+  const positions = [];
+
+  const addPos = (shape, barFret) => {
+    if (barFret < 0 || barFret > MAX_BARRE_FRET) return;
+    if (shapeFilter !== 'auto' && shape !== shapeFilter) return;
+    const off = CHORD_OFFSETS[shape][quality];
+    if (!off) return;
+    const frets = {};
+    for (let s = 1; s <= 6; s++) {
+      frets[s] = off[s] === null ? null : barFret + off[s];
+    }
+    const baseNote = Tone.Frequency(shape === 'E' ? 'E2' : 'A2').transpose(barFret).toNote();
+    positions.push({ shape, barFret, frets, baseNote });
+  };
+
+  const eF = E_BASE_FRET[root];
+  if (eF !== undefined) { addPos('E', eF); addPos('E', eF + 12); }
+
+  const aF = A_BASE_FRET[root];
+  if (aF !== undefined) { addPos('A', aF); addPos('A', aF + 12); }
+
+  positions.sort((a, b) => a.barFret - b.barFret || (a.shape === 'E' ? -1 : 1));
+  return positions;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main class
+// Pure utilities — pattern compilation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compile a pattern JSON into a step-indexed grid of events, plus pre-computed
+ * "ring" durations for notes that should hold until the next hit on the same string.
+ *
+ * @param {object} pattern - Pattern JSON (see pattern.schema.json)
+ * @returns {{ grid: Array<Array<object>>, loopLen: number }}
+ */
+export function compilePattern(pattern) {
+  const loopLen = pattern.loop_steps || 16;
+  const beatMap = pattern.resolution === '32n' ? BEAT_TO_STEP_32 : BEAT_TO_STEP;
+  const grid = Array.from({ length: loopLen }, () => []);
+  for (const step of pattern.steps) {
+    const idx = beatMap[step.beat];
+    if (idx !== undefined && idx < loopLen) grid[idx].push(step);
+  }
+
+  // Pre-compute "ring" durations. Two variants:
+  //   _resolvedRingDur     = capped at loop end (next loop is a different chord)
+  //   _resolvedRingDurNoCap = uncapped (next loop continues same chord → ring bleeds over)
+  const STEP_DUR = { 1: "16n", 2: "8n", 3: "8n.", 4: "4n", 6: "4n.", 8: "2n", 12: "2n.", 16: "1n" };
+  for (let i = 0; i < loopLen; i++) {
+    grid[i].forEach(event => {
+      // Clear stale values (could be from a previous compile if the event is shared)
+      delete event._resolvedRingDur;
+      delete event._resolvedRingDurNoCap;
+      if (event.duration !== 'ring' && !pattern.humanization?.default_single_duration) return;
+      const usesRing = event.duration === 'ring' ||
+        (pattern.humanization?.default_single_duration === 'ring' && event.strings.length === 1 && !event.duration);
+      if (!usesRing) return;
+
+      // For each string in this event, find when it next rings (cyclic over loop)
+      let minDist = loopLen;
+      event.strings.forEach(str => {
+        for (let d = 1; d < loopLen; d++) {
+          const nextIdx = (i + d) % loopLen;
+          const hits = grid[nextIdx].some(ev => ev.strings.includes(str));
+          if (hits) { minDist = Math.min(minDist, d); return; }
+        }
+      });
+
+      // If string is hit multiple times in the bar: shorten by 1 step (gap before next hit → no overlap)
+      // If hit only once: cap at half a bar (sampler release covers the rest)
+      let safeDistNoCap;
+      if (minDist < loopLen) {
+        safeDistNoCap = Math.max(1, minDist - 1);
+      } else {
+        safeDistNoCap = 8;
+      }
+      // Capped: note must not extend past end of loop
+      const safeDist = Math.min(safeDistNoCap, Math.max(1, loopLen - i - 1));
+      const STEP_KEYS = [1, 2, 3, 4, 6, 8, 12, 16];
+      const nearestKey = STEP_KEYS.filter(k => k <= safeDist).pop() || 1;
+      const nearestKeyNoCap = STEP_KEYS.filter(k => k <= safeDistNoCap).pop() || 1;
+      event._resolvedRingDur = STEP_DUR[nearestKey] || '2n';
+      event._resolvedRingDurNoCap = STEP_DUR[nearestKeyNoCap] || '2n';
+    });
+  }
+
+  return { grid, loopLen };
+}
+
+/**
+ * Resolve the final duration for a step event, respecting explicit duration,
+ * pre-computed ring durations, pattern-level humanization defaults, and boundary rules.
+ *
+ * @param {object}  event - Step event from a pattern
+ * @param {object}  pattern - Whole pattern JSON (for humanization defaults and style fallback)
+ * @param {boolean} [allowCrossBoundary=false] - If true, use uncapped ring duration (same chord continues)
+ * @returns {string} Tone.js duration string (e.g. '4n', '8n', '2n')
+ */
+export function resolveDuration(event, pattern, allowCrossBoundary = false) {
+  if (event.duration && event.duration !== 'ring') return event.duration;
+  const ringDur = (allowCrossBoundary && event._resolvedRingDurNoCap) ? event._resolvedRingDurNoCap : event._resolvedRingDur;
+  if (ringDur) return ringDur;
+  const h = pattern.humanization || {};
+  if (event.technique === 'palm_mute') return h.palm_mute_duration || '8n';
+  if (h.default_duration) return h.default_duration;
+  if (h.default_single_duration === 'ring' && event.strings.length === 1) {
+    return (allowCrossBoundary && event._resolvedRingDurNoCap) || event._resolvedRingDur || '2n';
+  }
+  if (pattern.meta?.style === 'fingerpick') return '4n';
+  return event.strings.length === 1 ? '4n' : '2n';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure utilities — chord sequence parser
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a chord sequence text into an array of chord descriptors.
+ *
+ * Notation:
+ *   A, Am, Amin7 — chord (maj/min/quality), full measure
+ *   C.           — half measure (2 beats in 4/4)
+ *   G..          — one beat
+ *   Am(001)      — chord with pattern code override (lookup via patNumMap)
+ *   F(e), F(a2)  — explicit shape (E or A), optional octave shift
+ *   C.(001a)     — combined: half measure + pattern 001 + A-shape
+ *
+ * @param {string} text - Free-form chord sequence text (whitespace-separated tokens)
+ * @param {object} [opts]
+ * @param {'4/4'|'3/4'} [opts.timeSignature='4/4'] - Affects measure length
+ * @param {object} [opts.patNumMap={}] - Map from pattern code → pattern ID, used for `Am(001)` resolution
+ * @returns {Array<object>} Chord descriptors:
+ *   [{ root, quality, steps, beats, patternId, patNum, shape, shapeOctave, _src }, ...]
+ */
+export function parseSequence(text, opts = {}) {
+  const timeSig = opts.timeSignature || '4/4';
+  const patNumMap = opts.patNumMap || {};
+  const tokens = (text || '').trim().split(/\s+/).filter(Boolean);
+  const chords = [];
+  const stepsPerBeat = 4; // 16n grid (canonical unit)
+  const beatsPerMeasure = timeSig === '3/4' ? 3 : 4;
+  const fullMeasure = beatsPerMeasure * stepsPerBeat;
+
+  for (const tok of tokens) {
+    // Regex: root + optional quality + dots + optional (instruction)
+    // Instruction: pattern code (1–3 chars) and/or shape (e|a|e2|a2)
+    const m = tok.match(/^([A-G][#b]?)(m(?:in)?7?|maj7|dim|aug|sus[24]|add9|[679]|m6)?(\.*)?(?:\(([^)]*)\))?$/i);
+    if (!m) continue;
+    const root = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+    const qRaw = (m[2] || '').toLowerCase();
+    const quality = SEQ_QUALITY_MAP[qRaw] || qRaw || 'maj';
+    const dots = (m[3] || '').length;
+
+    // Parse (...) content: pattern code + shape (e/a/e2/a2)
+    let patNum = null;
+    let shape = null;
+    let shapeOctave = 1;
+    const instr = (m[4] || '').trim();
+    if (instr) {
+      const im = instr.match(/^([a-z0-9]{1,3})?\s*([ea]2?)?$/i);
+      if (im) {
+        if (im[1]) {
+          // "a", "e", "a2", "e2" alone = shape, not pattern code
+          if (/^[ea]2?$/i.test(im[1]) && !im[2]) {
+            const s = im[1].toLowerCase();
+            shape = s.charAt(0) === 'a' ? 'A' : 'E';
+            shapeOctave = s.endsWith('2') ? 2 : 1;
+          } else {
+            patNum = im[1].toLowerCase();
+          }
+        }
+        if (im[2]) {
+          const s = im[2].toLowerCase();
+          shape = s.charAt(0) === 'a' ? 'A' : 'E';
+          shapeOctave = s.endsWith('2') ? 2 : 1;
+        }
+      }
+    }
+
+    // Length: 0 dots = full measure, 1 = half, 2+ = one beat
+    // `steps` kept (16n units) for backward compatibility
+    // `beats` is grid-independent (quarter notes) — used by the scheduler
+    let steps, beats;
+    if (dots === 0)      { steps = fullMeasure;     beats = beatsPerMeasure; }
+    else if (dots === 1) { steps = fullMeasure / 2; beats = beatsPerMeasure / 2; }
+    else                 { steps = stepsPerBeat;    beats = 1; }
+
+    const patternId = patNum ? (patNumMap[patNum] || null) : null;
+
+    chords.push({ root, quality, steps, beats, patternId, patNum, shape, shapeOctave, _src: tok });
+  }
+  return chords;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main class — PatternPlayer (steps 2–5 not yet implemented)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class PatternPlayer extends EventEmitter {
   /**
    * @param {object} config
-   * @param {Tone.Sampler} config.guitarSampler  — REQUIRED, pre-loaded Tone.Sampler
-   * @param {Tone.Sampler} [config.muteSampler]  — optional palm-mute variant sampler
-   * @param {number}       [config.bpm=100]
-   * @param {string}       [config.timeSignature='4/4']  — '4/4' | '3/4'
+   * @param {object} config.guitarSampler - REQUIRED, a pre-loaded Tone.Sampler
+   * @param {object} [config.muteSampler] - Optional palm-mute variant sampler
+   * @param {number} [config.bpm=100]
+   * @param {'4/4'|'3/4'} [config.timeSignature='4/4']
    */
   constructor(config = {}) {
     super();
@@ -90,63 +462,44 @@ export class PatternPlayer extends EventEmitter {
     this._muteSampler   = config.muteSampler || null;
     this._bpm           = config.bpm || 100;
     this._timeSignature = config.timeSignature || '4/4';
-
-    // Internal state (populated as milestones land)
     this._currentVoicing = null;
+    this._currentPosition = null;
     this._currentPattern = null;
     this._isPlaying = false;
     this._isPlayingSequence = false;
   }
 
   // ─── Voicing ─────────────────────────────────────────────────────────────
-  setChord({ root, quality, shape = 'E', shapeOctave = 1 }) {
+  setChord({ root, quality, shape = 'auto', shapeOctave = 1 }) {
     throw new Error('setChord: not yet implemented (Step 2)');
   }
 
   // ─── Single-chord playback ───────────────────────────────────────────────
-  loadPattern(patternJson) {
-    throw new Error('loadPattern: not yet implemented (Step 2)');
-  }
-  play() {
-    throw new Error('play: not yet implemented (Step 2)');
-  }
-  hotUpdatePattern(newPatternJson) {
-    throw new Error('hotUpdatePattern: not yet implemented (Step 4)');
-  }
+  loadPattern(patternJson)       { throw new Error('loadPattern: not yet implemented (Step 2)'); }
+  play()                         { throw new Error('play: not yet implemented (Step 2)'); }
+  hotUpdatePattern(newPattern)   { throw new Error('hotUpdatePattern: not yet implemented (Step 4)'); }
 
   // ─── Sequence playback ───────────────────────────────────────────────────
-  playSequence(text, opts = {}) {
-    throw new Error('playSequence: not yet implemented (Step 3)');
-  }
+  playSequence(text, opts)       { throw new Error('playSequence: not yet implemented (Step 3)'); }
 
   // ─── Common ──────────────────────────────────────────────────────────────
-  stop() {
-    throw new Error('stop: not yet implemented (Step 2)');
-  }
+  stop()                         { throw new Error('stop: not yet implemented (Step 2)'); }
 
   // ─── Runtime config ──────────────────────────────────────────────────────
   setBpm(bpm) {
     this._bpm = bpm;
     if (typeof Tone !== 'undefined' && Tone.Transport) Tone.Transport.bpm.value = bpm;
   }
-  setTimeSignature(ts) {
-    this._timeSignature = ts;
-  }
-  setMuteSampler(sampler) {
-    this._muteSampler = sampler;
-  }
+  setTimeSignature(ts)           { this._timeSignature = ts; }
+  setMuteSampler(sampler)        { this._muteSampler = sampler; }
 
-  // ─── Static utilities ────────────────────────────────────────────────────
-  static generateVoicing({ root, quality, shape = 'E', shapeOctave = 1 }) {
-    throw new Error('PatternPlayer.generateVoicing: not yet implemented (Step 1)');
-  }
-  static getAllPositions({ root, quality, shapeFilter }) {
-    throw new Error('PatternPlayer.getAllPositions: not yet implemented (Step 1)');
-  }
-  static compilePattern(patternJson) {
-    throw new Error('PatternPlayer.compilePattern: not yet implemented (Step 1)');
-  }
+  // ─── Static utilities (thin wrappers over the exported pure functions) ──
+  static generateVoicing(position, quality)   { return generateVoicing(position, quality); }
+  static resolveStrings(strings, shape)       { return resolveStrings(strings, shape); }
+  static getAllPositions(opts)                { return getAllPositions(opts); }
+  static compilePattern(pattern)              { return compilePattern(pattern); }
+  static resolveDuration(ev, pat, allow)      { return resolveDuration(ev, pat, allow); }
+  static parseSequence(text, opts)            { return parseSequence(text, opts); }
 }
 
-// Default export for convenience
 export default PatternPlayer;
