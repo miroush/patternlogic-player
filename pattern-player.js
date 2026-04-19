@@ -452,6 +452,7 @@ export class PatternPlayer extends EventEmitter {
    * @param {object} [config.muteSampler] - Optional palm-mute variant sampler
    * @param {number} [config.bpm=100]
    * @param {'4/4'|'3/4'} [config.timeSignature='4/4']
+   * @param {object} [config.humanization] - { velVariance, accentStrength, timingVarianceMs }
    */
   constructor(config = {}) {
     super();
@@ -462,36 +463,226 @@ export class PatternPlayer extends EventEmitter {
     this._muteSampler   = config.muteSampler || null;
     this._bpm           = config.bpm || 100;
     this._timeSignature = config.timeSignature || '4/4';
-    this._currentVoicing = null;
+    // Globální humanizace (navíc k té z pattern.humanization)
+    this._humanization = {
+      velVariance:       config.humanization?.velVariance       ?? 0.08,
+      accentStrength:    config.humanization?.accentStrength    ?? 0.15,
+      timingVarianceMs:  config.humanization?.timingVarianceMs  ?? 5,
+    };
+
+    // State
+    this._currentVoicing  = null;
     this._currentPosition = null;
-    this._currentPattern = null;
-    this._isPlaying = false;
+    this._currentQuality  = null;
+    this._currentPattern  = null;
+    this._compiled        = null;   // { grid, loopLen }
+    this._resolution      = '16n';
+    this._rmsScale        = 1;      // škála pro strum_delay (edit_bpm / playback_bpm)
+    this._currentStep     = 0;
+    this._repeatId        = null;
+    this._isPlaying       = false;
     this._isPlayingSequence = false;
   }
 
   // ─── Voicing ─────────────────────────────────────────────────────────────
-  setChord({ root, quality, shape = 'auto', shapeOctave = 1 }) {
-    throw new Error('setChord: not yet implemented (Step 2)');
+  /**
+   * Nastaví aktuální akord — vybere pozici podle shape/octave a pregeneruje voicing.
+   * @param {object} args
+   * @param {string} args.root      - 'C', 'C#', 'Bb' atd. (flats se převedou na sharps)
+   * @param {string} args.quality   - 'maj', 'min', 'dom7', ... (klíč ze SHAPES)
+   * @param {'E'|'A'|'auto'} [args.shape='auto']
+   * @param {number} [args.shapeOctave=1]  - 1 = základní pozice, 2 = o oktávu výš (+12 pražců)
+   */
+  setChord({ root, quality, shape = 'auto', shapeOctave = 1 } = {}) {
+    if (!root || !quality) throw new Error('setChord: root a quality jsou povinné');
+    const normRoot = FLAT_TO_SHARP[root] || root;
+    const positions = getAllPositions({ root: normRoot, quality, shapeFilter: shape === 'auto' ? 'auto' : shape });
+    if (positions.length === 0) {
+      throw new Error(`setChord: žádná pozice pro ${root} ${quality} (shape=${shape})`);
+    }
+    // Vybrat pozici podle shapeOctave: 1 = nižší barFret dané shape, 2 = vyšší
+    let pos;
+    if (shape === 'auto') {
+      pos = positions[0]; // nejnižší
+    } else {
+      const sameShape = positions.filter(p => p.shape === shape);
+      pos = sameShape[Math.min(shapeOctave - 1, sameShape.length - 1)] || sameShape[0];
+    }
+    this._currentPosition = pos;
+    this._currentQuality  = quality;
+    this._currentVoicing  = generateVoicing(pos, quality);
+    this.emit('chord', {
+      root: normRoot,
+      quality,
+      shape: pos.shape,
+      barFret: pos.barFret,
+      voicing: this._currentVoicing,
+      position: pos,
+    });
   }
 
-  // ─── Single-chord playback ───────────────────────────────────────────────
-  loadPattern(patternJson)       { throw new Error('loadPattern: not yet implemented (Step 2)'); }
-  play()                         { throw new Error('play: not yet implemented (Step 2)'); }
-  hotUpdatePattern(newPattern)   { throw new Error('hotUpdatePattern: not yet implemented (Step 4)'); }
+  // ─── Pattern ─────────────────────────────────────────────────────────────
+  /**
+   * Načte pattern, zkompiluje grid, přepočítá rms škálu pro strum_delay.
+   */
+  loadPattern(patternJson) {
+    if (!patternJson || !Array.isArray(patternJson.steps)) {
+      throw new Error('loadPattern: neplatný pattern (chybí steps)');
+    }
+    this._currentPattern = patternJson;
+    this._compiled       = compilePattern(patternJson);
+    this._resolution     = patternJson.resolution || '16n';
+    // RMS škála: pokud pattern má edit_bpm, strum_delay_ms se přepočítá k playback_bpm
+    this._rmsScale = (patternJson.edit_bpm && patternJson.edit_bpm > 0)
+      ? (patternJson.edit_bpm / this._bpm)
+      : 1;
+    this.emit('pattern', {
+      loopLen: this._compiled.loopLen,
+      resolution: this._resolution,
+      pattern: patternJson,
+    });
+  }
+
+  // ─── Playback ────────────────────────────────────────────────────────────
+  /**
+   * Spustí přehrávání načteného patternu s aktuálním akordem.
+   * Loopuje stejný akord dokud nezavoláš stop().
+   */
+  play() {
+    if (typeof Tone === 'undefined' || !Tone.Transport) {
+      throw new Error('play: Tone.js není dostupný (očekává se window.Tone)');
+    }
+    if (!this._currentPattern) throw new Error('play: nejdřív zavolej loadPattern(...)');
+    if (!this._currentVoicing) throw new Error('play: nejdřív zavolej setChord(...)');
+    if (this._isPlaying) this.stop();
+
+    // Nastavit BPM + přepočítat rms škálu pro aktuální tempo
+    Tone.Transport.bpm.value = this._bpm;
+    if (this._currentPattern.edit_bpm && this._currentPattern.edit_bpm > 0) {
+      this._rmsScale = this._currentPattern.edit_bpm / this._bpm;
+    }
+
+    this._currentStep = 0;
+    this._isPlaying   = true;
+
+    // Scheduler běží na resoluci patternu (16n nebo 32n).
+    // Sequence playback (Krok 3) poběží na '32n' + tickRatio, aby uměl míchat.
+    this._repeatId = Tone.Transport.scheduleRepeat(time => {
+      this._onTick(time);
+    }, this._resolution);
+
+    Tone.Transport.start('+0.1'); // malý lead-in, audio engine se stihne připravit
+    this.emit('start', { time: Tone.Transport.seconds });
+  }
+
+  /**
+   * Zastaví přehrávání, ukončí všechny doznívající noty.
+   */
+  stop() {
+    if (!this._isPlaying) return;
+    if (this._repeatId !== null && typeof Tone !== 'undefined' && Tone.Transport) {
+      try { Tone.Transport.clear(this._repeatId); } catch {}
+      this._repeatId = null;
+    }
+    // NE Tone.Transport.cancel() — smazalo by i ostatní callbacks (např. bass v hostové app)
+    if (typeof Tone !== 'undefined' && Tone.Transport) {
+      try { Tone.Transport.stop(); } catch {}
+    }
+    try { this._guitarSampler.releaseAll?.(); } catch {}
+    try { this._muteSampler?.releaseAll?.();  } catch {}
+    this._isPlaying   = false;
+    this._currentStep = 0;
+    this.emit('stop', {});
+  }
+
+  // ─── Scheduler tick (internal) ───────────────────────────────────────────
+  _onTick(time) {
+    const step = this._currentStep;
+    const loopLen = this._compiled.loopLen;
+    const events = this._compiled.grid[step] || [];
+
+    // Emit 'step' — UI se přihlásí pro step indikátor, overlay reset atd.
+    this.emit('step', { step, loopLen, time, resolution: this._resolution });
+
+    // Zpracovat všechny události na tomto kroku
+    for (const ev of events) {
+      this._triggerEvent(ev, time);
+    }
+
+    // Posun + detekce loopu
+    this._currentStep = (step + 1) % loopLen;
+    if (this._currentStep === 0) {
+      this.emit('loop', { time });
+    }
+  }
+
+  _triggerEvent(event, time) {
+    if (!this._currentPosition) return;
+    const resolved = resolveStrings(event.strings, this._currentPosition.shape);
+    const notes    = resolved.map(s => this._currentVoicing[s]).filter(Boolean);
+    // allowCrossBoundary=true → ring smí přečuhovat přes konec loopu, stejný akord pokračuje
+    const dur      = resolveDuration(event, this._currentPattern, true);
+
+    // Humanizace: kombinace pattern.humanization + globální this._humanization
+    const pHum     = this._currentPattern.humanization || {};
+    const patVarRange = pHum.vel_variance || 0;
+    const velVarPat   = (Math.random() * 2 - 1) * patVarRange;
+    const velVarGlob  = (Math.random() * 2 - 1) * this._humanization.velVariance;
+    const accentMul   = 1 + ((BEAT_ACCENT[event.beat] || 1) - 1) * this._humanization.accentStrength;
+    const baseVel     = event.vel ?? 0.7;
+    const vel         = Math.min(1, Math.max(0.01, (baseVel + velVarPat + velVarGlob) * accentMul));
+
+    const timingOff   = (Math.random() * 2 - 1) * (this._humanization.timingVarianceMs / 1000);
+
+    // Strum delay: relativní k edit_bpm (pokud je), škálovaný na aktuální tempo
+    const strumRaw    = event.strum_delay_ms !== undefined
+      ? event.strum_delay_ms
+      : (pHum.strum_delay_ms || 0);
+    const strumDelay  = strumRaw * this._rmsScale / 1000;
+
+    // Výběr sampleru (palm_mute → muteSampler, pokud je k dispozici)
+    const sampler = (event.technique === 'palm_mute' && this._muteSampler)
+      ? this._muteSampler
+      : this._guitarSampler;
+
+    // Spustit noty — každá struna se posune o strumDelay pro přirozený rozstřik
+    notes.forEach((note, idx) => {
+      try {
+        sampler.triggerAttackRelease(note, dur, time + idx * strumDelay + timingOff, vel);
+      } catch (err) {
+        // Neukončit loop — jen report a pokračovat
+        this.emit('error', { err, note, event });
+      }
+    });
+
+    // Emit 'note' — UI udělá fretboard highlight, overlay atd.
+    this.emit('note', {
+      notes, resolved, event, time, dur, vel,
+      technique: event.technique || null,
+      direction: event.direction || null,
+    });
+  }
 
   // ─── Sequence playback ───────────────────────────────────────────────────
   playSequence(text, opts)       { throw new Error('playSequence: not yet implemented (Step 3)'); }
-
-  // ─── Common ──────────────────────────────────────────────────────────────
-  stop()                         { throw new Error('stop: not yet implemented (Step 2)'); }
+  hotUpdatePattern(newPattern)   { throw new Error('hotUpdatePattern: not yet implemented (Step 4)'); }
 
   // ─── Runtime config ──────────────────────────────────────────────────────
   setBpm(bpm) {
     this._bpm = bpm;
     if (typeof Tone !== 'undefined' && Tone.Transport) Tone.Transport.bpm.value = bpm;
+    // Přepočítat rms škálu pro strum_delay
+    if (this._currentPattern?.edit_bpm > 0) {
+      this._rmsScale = this._currentPattern.edit_bpm / bpm;
+    }
   }
   setTimeSignature(ts)           { this._timeSignature = ts; }
   setMuteSampler(sampler)        { this._muteSampler = sampler; }
+
+  // Veřejný getter na aktuální voicing (UI si může sáhnout pro fretboard render)
+  get currentVoicing()  { return this._currentVoicing; }
+  get currentPosition() { return this._currentPosition; }
+  get isPlaying()       { return this._isPlaying; }
 
   // ─── Static utilities (thin wrappers over the exported pure functions) ──
   static generateVoicing(position, quality)   { return generateVoicing(position, quality); }

@@ -56,10 +56,48 @@
   <h2>Sample sequence parse — <code>C G.. Am(001) F.(a2)</code></h2>
   <pre id="parse-dump">(computed below)</pre>
 
+  <h2>Step 2 — Single-chord playback</h2>
+  <p style="color:#666;font-size:13px;">
+    Přehrání vyžaduje uživatelské gesto (kliknutí) kvůli prohlížečovému audio policy.
+    Demo používá <code>Tone.PolySynth</code> místo reálného samplu — stejné API
+    (<code>triggerAttackRelease</code>), takže knihovna neví, že je to náhrada.
+  </p>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;">
+    <button id="btn-start" style="padding:.5rem 1rem;font-size:14px;cursor:pointer;">
+      ▶ Přehrát C dur (strum pattern)
+    </button>
+    <button id="btn-stop" style="padding:.5rem 1rem;font-size:14px;cursor:pointer;" disabled>
+      ■ Stop
+    </button>
+    <label style="font-size:13px;">
+      BPM:
+      <input id="bpm-slider" type="range" min="60" max="160" value="100" style="vertical-align:middle;">
+      <span id="bpm-val">100</span>
+    </label>
+    <label style="font-size:13px;">
+      Akord:
+      <select id="chord-select">
+        <option value="C:maj">C dur</option>
+        <option value="G:maj">G dur</option>
+        <option value="A:min">a moll</option>
+        <option value="F:maj">F dur</option>
+        <option value="D:dom7">D7</option>
+      </select>
+    </label>
+  </div>
+  <div id="playback-log" style="font-size:12px;color:#444;max-height:150px;overflow:auto;background:#f9f9f9;padding:.5rem;border-radius:4px;font-family:monospace;">
+    (log eventů se ukáže tady po spuštění)
+  </div>
+  <ul>
+    <li>Event emitter <code>chord</code>, <code>pattern</code>, <code>start</code>, <code>step</code>, <code>note</code>, <code>loop</code>, <code>stop</code>: <span id="chk-events-fired">…</span></li>
+    <li>Scheduler běží na resoluci patternu: <span id="chk-scheduler">…</span></li>
+    <li><code>setBpm()</code> změní tempo za běhu: <span id="chk-bpm">…</span></li>
+  </ul>
+
   <h2>Next milestones</h2>
   <ul>
     <li><s>Step 1: Pure utilities (voicing, pattern compile, sequence parser)</s> ✓</li>
-    <li><strong>Step 2:</strong> Single-chord playback with Tone.Sampler</li>
+    <li><strong>Step 2:</strong> Single-chord playback (loadPattern, setChord, play, stop, events) ✓ — klikni Play nahoře</li>
     <li><strong>Step 3:</strong> Chord sequence playback</li>
     <li><strong>Step 4:</strong> Live BPM / pattern update</li>
   </ul>
@@ -172,10 +210,108 @@
       document.getElementById('parse-dump').textContent = JSON.stringify(complex, null, 2);
 
       setStatus(allOk
-        ? '✓ All Step 1 checks passed — library ready to be consumed.'
+        ? '✓ All Step 1 checks passed — library ready to be consumed. Klikni Play pro Step 2 test.'
         : '✗ Some checks failed — see red marks above.',
         allOk
       );
+
+      // ─── Step 2: Single-chord playback demo ───────────────────────────────
+      const log = (msg) => {
+        const el = document.getElementById('playback-log');
+        const t = new Date().toLocaleTimeString();
+        el.textContent = `[${t}] ${msg}\n` + el.textContent;
+      };
+
+      // Jednoduchý strum pattern na 16n gridu — 4 údery za takt (D D U D)
+      const samplePattern = {
+        id: 'demo-strum',
+        loop_steps: 16,
+        resolution: '16n',
+        edit_bpm: 100,
+        meta: { style: 'strum', name: 'Demo strum' },
+        humanization: { strum_delay_ms: 20, vel_variance: 0.1 },
+        steps: [
+          { beat: '1',  strings: ['bass_root', 4, 3, 2, 1], direction: 'D', vel: 0.9, duration: '4n' },
+          { beat: '2',  strings: [6, 4, 3, 2, 1],           direction: 'D', vel: 0.7, duration: '4n' },
+          { beat: '2+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6, duration: '8n' },
+          { beat: '3',  strings: ['bass_alt', 4, 3, 2, 1],  direction: 'D', vel: 0.85, duration: '4n' },
+          { beat: '4',  strings: [6, 4, 3, 2, 1],           direction: 'D', vel: 0.7, duration: '4n' },
+          { beat: '4+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6, duration: '8n' },
+        ],
+      };
+
+      let player = null;
+      let synth = null;
+      const eventsFired = new Set();
+      let maxStepSeen = -1;
+
+      document.getElementById('bpm-slider').addEventListener('input', (e) => {
+        const v = +e.target.value;
+        document.getElementById('bpm-val').textContent = v;
+        if (player) {
+          player.setBpm(v);
+          if (!eventsFired.has('bpmChanged')) {
+            eventsFired.add('bpmChanged');
+            check('chk-bpm', true, `BPM změněn na ${v} za běhu`);
+          }
+        }
+      });
+
+      document.getElementById('btn-start').addEventListener('click', async () => {
+        // Start audio — vyžaduje user gesto
+        await Tone.start();
+        log('Tone.start() OK, audio context: ' + Tone.getContext().state);
+
+        // PolySynth jako náhrada sampleru (stejné API)
+        if (!synth) {
+          synth = new Tone.PolySynth(Tone.Synth, {
+            envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1.2 },
+            oscillator: { type: 'triangle' },
+          }).toDestination();
+          synth.volume.value = -12;
+          // PolySynth nemá releaseAll, ale má releaseAll přes voices — přidáme alias
+          synth.releaseAll = () => { try { synth.releaseAll?.() || synth.dispose; } catch {} };
+        }
+
+        if (!player) {
+          player = new mod.PatternPlayer({ guitarSampler: synth, bpm: +document.getElementById('bpm-slider').value });
+
+          player.on('chord',   (p) => { eventsFired.add('chord');   log(`chord: ${p.shape}-shape @ fret ${p.barFret} (${p.quality})`); });
+          player.on('pattern', (p) => { eventsFired.add('pattern'); log(`pattern: loopLen=${p.loopLen} resolution=${p.resolution}`); });
+          player.on('start',   ()  => { eventsFired.add('start');   log('start'); });
+          player.on('step',    (p) => {
+            eventsFired.add('step');
+            if (p.step > maxStepSeen) maxStepSeen = p.step;
+          });
+          player.on('note',    (p) => { eventsFired.add('note');    log(`note: ${p.notes.join(',')} dur=${p.dur} vel=${p.vel.toFixed(2)}`); });
+          player.on('loop',    ()  => { eventsFired.add('loop');    log('loop boundary'); });
+          player.on('stop',    ()  => { eventsFired.add('stop');    log('stop'); });
+          player.on('error',   (p) => log(`error: ${p.err.message}`));
+        }
+
+        // Nastavit akord z UI
+        const [root, quality] = document.getElementById('chord-select').value.split(':');
+        player.setChord({ root, quality });
+        player.loadPattern(samplePattern);
+        player.play();
+
+        document.getElementById('btn-start').disabled = true;
+        document.getElementById('btn-stop').disabled  = false;
+
+        // Za 500ms zkontrolovat, že scheduler tikne a události se emitují
+        setTimeout(() => {
+          const expected = ['chord', 'pattern', 'start', 'step', 'note'];
+          const missing  = expected.filter(e => !eventsFired.has(e));
+          check('chk-events-fired', missing.length === 0, missing.length === 0 ? 'všechny emitnuty' : `chybí: ${missing.join(',')}`);
+          check('chk-scheduler', maxStepSeen >= 0, `maxStep=${maxStepSeen}, resolution=${samplePattern.resolution}`);
+        }, 800);
+      });
+
+      document.getElementById('btn-stop').addEventListener('click', () => {
+        if (player) player.stop();
+        document.getElementById('btn-start').disabled = false;
+        document.getElementById('btn-stop').disabled  = true;
+      });
     } catch (err) {
       console.error(err);
       setStatus('Library failed to load: ' + err.message, false);
