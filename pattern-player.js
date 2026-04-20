@@ -21,6 +21,11 @@ class EventEmitter {
     return () => this.off(event, handler);
   }
   off(event, handler) {
+    if (!handler) {
+      // off(event) bez handleru → smazat všechny handlery daného eventu
+      delete this._handlers[event];
+      return;
+    }
     const list = this._handlers[event];
     if (!list) return;
     const idx = list.indexOf(handler);
@@ -576,10 +581,11 @@ export class PatternPlayer extends EventEmitter {
   }
 
   /**
-   * Zastaví přehrávání, ukončí všechny doznívající noty.
+   * Zastaví přehrávání (single chord i sekvenci), ukončí všechny doznívající noty.
    */
   stop() {
-    if (!this._isPlaying) return;
+    if (!this._isPlaying && !this._isPlayingSequence) return;
+    const wasSequence = this._isPlayingSequence;
     if (this._repeatId !== null && typeof Tone !== 'undefined' && Tone.Transport) {
       try { Tone.Transport.clear(this._repeatId); } catch {}
       this._repeatId = null;
@@ -590,9 +596,14 @@ export class PatternPlayer extends EventEmitter {
     }
     try { this._guitarSampler.releaseAll?.(); } catch {}
     try { this._muteSampler?.releaseAll?.();  } catch {}
-    this._isPlaying   = false;
-    this._currentStep = 0;
-    this.emit('stop', {});
+    this._isPlaying         = false;
+    this._isPlayingSequence = false;
+    this._currentStep       = 0;
+    this._seqChordIdx       = 0;
+    this._seqStepInChord    = 0;
+    this._seqEnded          = false;
+    if (this._seqTriggeredNotes) this._seqTriggeredNotes.clear();
+    this.emit('stop', { sequence: wasSequence });
   }
 
   // ─── Scheduler tick (internal) ───────────────────────────────────────────
@@ -664,7 +675,285 @@ export class PatternPlayer extends EventEmitter {
   }
 
   // ─── Sequence playback ───────────────────────────────────────────────────
-  playSequence(text, opts)       { throw new Error('playSequence: not yet implemented (Step 3)'); }
+  /**
+   * Přehraje sekvenci akordů z textu ("C G Am F.(001)").
+   *
+   * Scheduler běží vždy na '32n' gridu (8 tiků/doba) — univerzální grid, co umí
+   * míchat 16n i 32n patterny v jedné sekvenci. 16n patterny triggerují jen na
+   * sudých tikcích (tickRatio=2), 32n na všech (tickRatio=1).
+   *
+   * @param {string} text - Text sekvence (viz parseSequence)
+   * @param {object} [opts]
+   * @param {boolean} [opts.loop=true] - Loopovat sekvenci po dokončení
+   * @param {string}  [opts.timeSignature] - '4/4' nebo '3/4' (default self._timeSignature)
+   * @param {object}  [opts.patNumMap] - { '001': 'patternId' } pro parser
+   * @param {object}  [opts.defaultPattern] - Pattern pro chordy bez patternId
+   * @param {Function}[opts.getPattern] - (patternId) => pattern, lookup pro ch.patternId
+   * @param {Function}[opts.getText] - () => string, pokud definován, reparse textu na akord boundary (živé změny textarey)
+   * @param {Function}[opts.getDefaultPattern] - () => pattern, pokud definován, recompile patternu pro chordy bez patternId (živé změny editoru)
+   */
+  playSequence(text, opts = {}) {
+    if (typeof Tone === 'undefined' || !Tone.Transport) {
+      throw new Error('playSequence: Tone.js není dostupný');
+    }
+    const timeSig = opts.timeSignature || this._timeSignature;
+    const chords = parseSequence(text, { timeSignature: timeSig, patNumMap: opts.patNumMap });
+    if (chords.length === 0) throw new Error('playSequence: žádné akordy v textu');
+
+    if (this._isPlaying || this._isPlayingSequence) this.stop();
+
+    // Resolve první pattern
+    const getPat = opts.getPattern || ((id) => null);
+    const getDefaultPat = opts.getDefaultPattern || (() => opts.defaultPattern);
+
+    let firstPat = chords[0].patternId ? getPat(chords[0].patternId) : null;
+    if (!firstPat) firstPat = opts.defaultPattern;
+    if (!firstPat) throw new Error('playSequence: defaultPattern je povinný (nebo první chord musí mít patternId s odpovídajícím getPattern)');
+
+    // Setup state
+    this._seqText            = text;
+    this._seqOpts            = opts;
+    this._seqChords          = chords;
+    this._seqChordIdx        = 0;
+    this._seqStepInChord     = 0;
+    this._seqEnded           = false;
+    this._seqLoop            = opts.loop !== false;
+    this._seqCurrentPattern  = firstPat;
+    this._compiled           = compilePattern(firstPat);
+    this._resolution         = firstPat.resolution || '16n';
+    this._currentPattern     = firstPat;
+    // Noty aktuálně doznívající (pro cut na chord boundary, když se akord změní)
+    this._seqTriggeredNotes  = new Set();
+    this._seqLastVoicingKey  = `${chords[0].root}|${chords[0].quality}`;
+
+    // BPM
+    Tone.Transport.bpm.value = this._bpm;
+    this._rmsScale = (firstPat.edit_bpm && firstPat.edit_bpm > 0) ? (firstPat.edit_bpm / this._bpm) : 1;
+
+    // První akord — voicing
+    this.setChord({
+      root: chords[0].root,
+      quality: chords[0].quality,
+      shape: chords[0].shape || 'auto',
+      shapeOctave: chords[0].shapeOctave || 1,
+    });
+
+    this._isPlayingSequence = true;
+    this._isPlaying         = true; // pro stop() logiku
+
+    // Emit start events
+    this.emit('seq-start', { chords: [...chords], loop: this._seqLoop });
+    this.emit('pattern', { loopLen: this._compiled.loopLen, resolution: this._resolution, pattern: firstPat });
+    this.emit('seq-chord', { chord: chords[0], index: 0 });
+
+    // Scheduler — vždy '32n' pro uniformní grid
+    this._repeatId = Tone.Transport.scheduleRepeat((time) => {
+      this._onSeqTick(time);
+    }, '32n');
+
+    Tone.Transport.start('+0.1'); // audio lead-in
+    this.emit('start', { time: Tone.Transport.seconds, sequence: true });
+  }
+
+  /**
+   * Interní scheduler tick pro playSequence. Běží na '32n' (8 tiků/doba).
+   */
+  _onSeqTick(time) {
+    // End-of-sequence guard: stop je async, další ticky po posledním akordu přeskočit.
+    if (this._seqEnded) return;
+
+    const SCHED_TICKS_PER_BEAT = 8;
+    const chordSchedTicks = (ch) => Math.max(1, Math.round(ch.beats * SCHED_TICKS_PER_BEAT));
+    const patTickRatio    = (p)  => (p.resolution === '32n') ? 1 : 2;
+
+    // Emit 'tick' — pro metronom a granulární UI (zelená světýlka, step box)
+    this.emit('tick', { rawTick: this._seqStepInChord, time });
+
+    // ─── Akord boundary — přepnout na další akord? ─────────────────────────
+    if (this._seqStepInChord >= chordSchedTicks(this._seqChords[this._seqChordIdx])) {
+      // Živé změny textarey — reparse, pokud host dodal getText callback
+      if (typeof this._seqOpts.getText === 'function') {
+        try {
+          const freshText = this._seqOpts.getText();
+          if (freshText && freshText !== this._seqText) {
+            const fresh = parseSequence(freshText, {
+              timeSignature: this._seqOpts.timeSignature || this._timeSignature,
+              patNumMap: this._seqOpts.patNumMap,
+            });
+            if (fresh.length) {
+              this._seqChords = fresh;
+              this._seqText   = freshText;
+              this.emit('seq-reparse', { chords: [...fresh] });
+            }
+          }
+        } catch {}
+      }
+
+      this._seqChordIdx++;
+      if (this._seqChordIdx >= this._seqChords.length) {
+        if (this._seqLoop) {
+          this._seqChordIdx = 0;
+          this.emit('seq-loop', { time });
+        } else {
+          // Konec sekvence, loop off. Další ticky přeskočit (stop je async).
+          this._seqEnded = true;
+          Promise.resolve().then(() => this.stop());
+          return;
+        }
+      }
+      this._seqStepInChord = 0;
+
+      // Přepnout akord — voicing
+      const ch = this._seqChords[this._seqChordIdx];
+      this.setChord({
+        root: ch.root,
+        quality: ch.quality,
+        shape: ch.shape || 'auto',
+        shapeOctave: ch.shapeOctave || 1,
+      });
+      this.emit('seq-chord', { chord: ch, index: this._seqChordIdx });
+      // Recompile pattern proběhne na loop boundary (stepInPattern === 0) níže
+    }
+
+    // ─── Konverze scheduler-tick → pattern step ─────────────────────────────
+    const ratio         = patTickRatio(this._seqCurrentPattern);
+    const loopLen       = this._compiled.loopLen;
+    const loopSchedTicks = loopLen * ratio;
+    const tickInLoop    = this._seqStepInChord % loopSchedTicks;
+    const stepInPattern = Math.floor(tickInLoop / ratio);
+    const triggerThis   = (tickInLoop % ratio) === 0;
+    const curCh         = this._seqChords[this._seqChordIdx];
+    const curKey        = `${curCh.root}|${curCh.quality}`;
+
+    // ─── Pattern loop boundary — recompile pro živé změny ──────────────────
+    if (triggerThis && stepInPattern === 0) {
+      // Cut doznívající noty JEN když se akord od minulého boundary změnil
+      if (curKey !== this._seqLastVoicingKey && this._seqTriggeredNotes.size > 0) {
+        const savedRelease = this._guitarSampler.release;
+        try {
+          this._guitarSampler.release = 0.01;
+          this._seqTriggeredNotes.forEach(note => {
+            try { this._guitarSampler.triggerRelease?.(note, time); } catch {}
+          });
+        } finally {
+          if (savedRelease !== undefined) this._guitarSampler.release = savedRelease;
+        }
+      }
+      this._seqTriggeredNotes.clear();
+      this._seqLastVoicingKey = curKey;
+
+      // Recompile: akord s patternId → lookup, bez → getDefaultPattern() callback
+      const prevResolution = this._seqCurrentPattern.resolution || '16n';
+      const prevLoopLen    = loopLen;
+      let newPat = null;
+      if (curCh.patternId && typeof this._seqOpts.getPattern === 'function') {
+        newPat = this._seqOpts.getPattern(curCh.patternId);
+      }
+      if (!newPat) {
+        // Bez patternId → host může dodat getDefaultPattern callback pro živý editor refresh
+        if (typeof this._seqOpts.getDefaultPattern === 'function') {
+          newPat = this._seqOpts.getDefaultPattern();
+        } else {
+          newPat = this._seqOpts.defaultPattern || this._seqCurrentPattern;
+        }
+      }
+      if (newPat && newPat !== this._seqCurrentPattern) {
+        this._seqCurrentPattern = newPat;
+        this._currentPattern    = newPat;
+        this._compiled          = compilePattern(newPat);
+        this._resolution        = newPat.resolution || '16n';
+        this._rmsScale = (newPat.edit_bpm && newPat.edit_bpm > 0) ? (newPat.edit_bpm / this._bpm) : 1;
+        this.emit('pattern', {
+          loopLen: this._compiled.loopLen,
+          resolution: this._resolution,
+          pattern: newPat,
+          chordIndex: this._seqChordIdx,
+        });
+      }
+    }
+
+    // ─── Emit step + trigger events (jen když tick odpovídá pattern kroku) ─
+    if (triggerThis) {
+      this.emit('step', {
+        step: stepInPattern,
+        loopLen: this._compiled.loopLen,
+        time,
+        resolution: this._resolution,
+        sequence: true,
+        chordIndex: this._seqChordIdx,
+      });
+
+      // Ring přes hranici: mid-chord → ano, last chord bez loop → ne, jinak záleží na dalším akordu
+      const schedTicksRemainingInChord = chordSchedTicks(curCh) - this._seqStepInChord;
+      const schedTicksRemainingInLoop  = loopSchedTicks - tickInLoop;
+      let allowCrossBoundary;
+      if (schedTicksRemainingInChord > schedTicksRemainingInLoop) {
+        allowCrossBoundary = true; // mid-chord, voicing pokračuje
+      } else {
+        const isLastChord = (this._seqChordIdx === this._seqChords.length - 1) && !this._seqLoop;
+        if (isLastChord) {
+          allowCrossBoundary = false;
+        } else {
+          const nextCh = this._seqChords[(this._seqChordIdx + 1) % this._seqChords.length];
+          allowCrossBoundary = !!(nextCh && nextCh.root === curCh.root && nextCh.quality === curCh.quality);
+        }
+      }
+
+      const events = this._compiled.grid[stepInPattern] || [];
+      for (const ev of events) {
+        this._triggerSeqEvent(ev, time, allowCrossBoundary);
+      }
+
+      if (stepInPattern === 0 && this._seqStepInChord > 0) {
+        this.emit('loop', { time });
+      }
+    }
+
+    this._seqStepInChord++;
+  }
+
+  /**
+   * Varianta _triggerEvent s podporou allowCrossBoundary a tracking doznívajících not.
+   */
+  _triggerSeqEvent(event, time, allowCrossBoundary) {
+    if (!this._currentPosition) return;
+    const resolved = resolveStrings(event.strings, this._currentPosition.shape);
+    const notes    = resolved.map(s => this._currentVoicing[s]).filter(Boolean);
+    const dur      = resolveDuration(event, this._seqCurrentPattern, allowCrossBoundary);
+
+    const pHum     = this._seqCurrentPattern.humanization || {};
+    const patVarRange = pHum.vel_variance || 0;
+    const velVarPat   = (Math.random() * 2 - 1) * patVarRange;
+    const velVarGlob  = (Math.random() * 2 - 1) * this._humanization.velVariance;
+    const accentMul   = 1 + ((BEAT_ACCENT[event.beat] || 1) - 1) * this._humanization.accentStrength;
+    const baseVel     = event.vel ?? 0.7;
+    const vel         = Math.min(1, Math.max(0.01, (baseVel + velVarPat + velVarGlob) * accentMul));
+
+    const timingOff   = (Math.random() * 2 - 1) * (this._humanization.timingVarianceMs / 1000);
+    const strumRaw    = event.strum_delay_ms !== undefined ? event.strum_delay_ms : (pHum.strum_delay_ms || 0);
+    const strumDelay  = strumRaw * this._rmsScale / 1000;
+
+    const sampler = (event.technique === 'palm_mute' && this._muteSampler)
+      ? this._muteSampler
+      : this._guitarSampler;
+
+    notes.forEach((note, idx) => {
+      try {
+        sampler.triggerAttackRelease(note, dur, time + idx * strumDelay + timingOff, vel);
+        this._seqTriggeredNotes.add(note);
+      } catch (err) {
+        this.emit('error', { err, note, event });
+      }
+    });
+
+    this.emit('note', {
+      notes, resolved, event, time, dur, vel,
+      technique: event.technique || null,
+      direction: event.direction || null,
+      sequence: true,
+    });
+  }
+
   hotUpdatePattern(newPattern)   { throw new Error('hotUpdatePattern: not yet implemented (Step 4)'); }
 
   // ─── Runtime config ──────────────────────────────────────────────────────

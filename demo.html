@@ -94,11 +94,34 @@
     <li><code>setBpm()</code> změní tempo za běhu: <span id="chk-bpm">…</span></li>
   </ul>
 
+  <h2>Step 3 — Sequence playback</h2>
+  <p style="color:#666;font-size:13px;">
+    Scheduler vždy na 32n gridu, zvládá mix 16n i 32n patternů v jedné sekvenci. Text se reparsuje
+    na hranici každého akordu (živé změny), loop se obnoví z aktuálního textu.
+  </p>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;">
+    <textarea id="seq-input" rows="2" style="flex:1;min-width:300px;font-family:monospace;font-size:13px;padding:.4rem;">C G Am F</textarea>
+  </div>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;">
+    <button id="btn-seq-start" style="padding:.5rem 1rem;font-size:14px;cursor:pointer;">▶ Přehrát sekvenci</button>
+    <button id="btn-seq-stop" style="padding:.5rem 1rem;font-size:14px;cursor:pointer;" disabled>■ Stop</button>
+    <label style="font-size:13px;"><input id="seq-loop-chk" type="checkbox" checked> Loop</label>
+    <div id="seq-chips" style="display:flex;gap:.25rem;flex-wrap:wrap;font-size:12px;"></div>
+  </div>
+  <div id="seq-log" style="font-size:12px;color:#444;max-height:180px;overflow:auto;background:#f9f9f9;padding:.5rem;border-radius:4px;font-family:monospace;">
+    (sekvenční log se ukáže po spuštění)
+  </div>
+  <ul>
+    <li>Eventy <code>seq-start</code>, <code>seq-chord</code>, <code>seq-loop</code>: <span id="chk-seq-events">…</span></li>
+    <li>Recompile při změně patternu (mix 16n/32n): <span id="chk-seq-mix">…</span></li>
+    <li>Živé re-parse textarey na akord boundary: <span id="chk-seq-reparse">…</span></li>
+  </ul>
+
   <h2>Next milestones</h2>
   <ul>
     <li><s>Step 1: Pure utilities (voicing, pattern compile, sequence parser)</s> ✓</li>
-    <li><strong>Step 2:</strong> Single-chord playback (loadPattern, setChord, play, stop, events) ✓ — klikni Play nahoře</li>
-    <li><strong>Step 3:</strong> Chord sequence playback</li>
+    <li><s>Step 2: Single-chord playback (loadPattern, setChord, play, stop, events)</s> ✓</li>
+    <li><s>Step 3: Chord sequence playback (playSequence, mix 16n/32n, live reparse)</s> ✓</li>
     <li><strong>Step 4:</strong> Live BPM / pattern update</li>
   </ul>
 
@@ -311,6 +334,151 @@
         if (player) player.stop();
         document.getElementById('btn-start').disabled = false;
         document.getElementById('btn-stop').disabled  = true;
+      });
+
+      // ─── Step 3: Sequence playback demo ──────────────────────────────────
+      const seqLog = (msg) => {
+        const el = document.getElementById('seq-log');
+        const t = new Date().toLocaleTimeString();
+        el.textContent = `[${t}] ${msg}\n` + el.textContent;
+      };
+
+      // Druhý pattern — 32n fingerpick (bude namixován s 16n strum přes patNumMap)
+      const pat32 = {
+        id: 'demo-fp-32',
+        loop_steps: 32,
+        resolution: '32n',
+        edit_bpm: 100,
+        meta: { style: 'fingerpick', name: 'Demo fingerpick 32n' },
+        humanization: { vel_variance: 0.08 },
+        steps: [
+          { beat: '1',   strings: ['bass_root'], vel: 0.85, duration: '4n' },
+          { beat: '1.',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '1e',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '1e.', strings: [1], vel: 0.7, duration: '8n' },
+          { beat: '1+',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '1a',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '2',   strings: ['bass_alt'], vel: 0.8, duration: '4n' },
+          { beat: '2.',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '2e',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '2e.', strings: [1], vel: 0.7, duration: '8n' },
+          { beat: '2+',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '2a',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '3',   strings: ['bass_root'], vel: 0.85, duration: '4n' },
+          { beat: '3.',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '3e',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '3e.', strings: [1], vel: 0.7, duration: '8n' },
+          { beat: '3+',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '3a',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '4',   strings: ['bass_alt'], vel: 0.8, duration: '4n' },
+          { beat: '4.',  strings: [3], vel: 0.7, duration: '8n' },
+          { beat: '4e',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '4e.', strings: [1], vel: 0.7, duration: '8n' },
+          { beat: '4+',  strings: [2], vel: 0.7, duration: '8n' },
+          { beat: '4a',  strings: [3], vel: 0.7, duration: '8n' },
+        ],
+      };
+
+      const patternsById = { 'pat-strum-16': samplePattern, 'pat-fp-32': pat32 };
+      const patNumMap    = { '016': 'pat-strum-16', '032': 'pat-fp-32' };
+
+      const seqEvents = new Set();
+      let seqResolutionsSeen = new Set();
+      let reparseHappened = false;
+
+      const renderChips = (chords, activeIdx = -1) => {
+        const host = document.getElementById('seq-chips');
+        host.innerHTML = chords.map((ch, i) =>
+          `<span style="padding:2px 6px;border-radius:3px;background:${i === activeIdx ? '#4a90e2' : '#eee'};color:${i === activeIdx ? '#fff' : '#333'};">${ch._src || ch.root}</span>`
+        ).join('');
+      };
+
+      document.getElementById('btn-seq-start').addEventListener('click', async () => {
+        await Tone.start();
+        if (!synth) {
+          synth = new Tone.PolySynth(Tone.Synth, {
+            envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1.2 },
+            oscillator: { type: 'triangle' },
+          }).toDestination();
+          synth.volume.value = -12;
+        }
+        if (!player) {
+          player = new mod.PatternPlayer({ guitarSampler: synth, bpm: +document.getElementById('bpm-slider').value });
+        }
+        // Vyčistit starší listenery nebo použít nové
+        player.off('seq-start'); player.off('seq-chord'); player.off('seq-loop'); player.off('seq-reparse'); player.off('pattern');
+        seqEvents.clear(); seqResolutionsSeen.clear(); reparseHappened = false;
+
+        player.on('seq-start', (p) => {
+          seqEvents.add('seq-start');
+          seqLog(`seq-start: ${p.chords.length} akord(ů), loop=${p.loop}`);
+          renderChips(p.chords, 0);
+        });
+        player.on('seq-chord', (p) => {
+          seqEvents.add('seq-chord');
+          seqLog(`seq-chord #${p.index}: ${p.chord.root} ${p.chord.quality} (pat=${p.chord.patternId || '—'})`);
+          // Re-render chips s aktuálním indexem (využijeme interní stav přes eval)
+          const host = document.getElementById('seq-chips');
+          host.querySelectorAll('span').forEach((el, i) => {
+            el.style.background = i === p.index ? '#4a90e2' : '#eee';
+            el.style.color      = i === p.index ? '#fff'    : '#333';
+          });
+        });
+        player.on('seq-loop', () => {
+          seqEvents.add('seq-loop');
+          seqLog('seq-loop (restart)');
+        });
+        player.on('seq-reparse', (p) => {
+          reparseHappened = true;
+          seqLog(`seq-reparse: nová sekvence (${p.chords.length} akord(ů))`);
+          renderChips(p.chords);
+          // Jakmile knihovna reparsla text → check je splněný
+          check('chk-seq-reparse', true, `reparse po změně textarey za běhu`);
+        });
+        player.on('pattern', (p) => {
+          seqResolutionsSeen.add(p.resolution);
+          seqLog(`pattern: ${p.pattern.meta?.name || p.pattern.id} (${p.resolution}, loopLen=${p.loopLen})`);
+          // Jakmile scheduler viděl 16n i 32n v jedné sekvenci → mix check OK
+          if (seqResolutionsSeen.has('16n') && seqResolutionsSeen.has('32n')) {
+            check('chk-seq-mix', true, `viděné: ${[...seqResolutionsSeen].join(', ')}`);
+          }
+        });
+
+        const text = document.getElementById('seq-input').value.trim() || 'C G Am F';
+        player.playSequence(text, {
+          loop: document.getElementById('seq-loop-chk').checked,
+          patNumMap,
+          defaultPattern: samplePattern,
+          getPattern: (id) => patternsById[id] || null,
+          // Živé změny textarey — knihovna reparsuje na akord boundary
+          getText: () => document.getElementById('seq-input').value,
+        });
+        document.getElementById('btn-seq-start').disabled = true;
+        document.getElementById('btn-seq-stop').disabled  = false;
+
+        // Po 1.5s zkontroluj, že eventy odpálily
+        setTimeout(() => {
+          const need = ['seq-start', 'seq-chord'];
+          const missing = need.filter(e => !seqEvents.has(e));
+          check('chk-seq-events', missing.length === 0, missing.length === 0 ? 'seq-start + seq-chord OK' : `chybí: ${missing.join(',')}`);
+        }, 1500);
+
+        // Po 2s (mid-1. akord) automaticky upravit textareu → vynutí reparse
+        // na hranici dalšího akordu. Děláme jen pokud uživatel nezměnil text sám.
+        const ta = document.getElementById('seq-input');
+        const originalText = ta.value;
+        setTimeout(() => {
+          if (ta.value === originalText && !reparseHappened) {
+            ta.value = originalText + ' D';
+            seqLog(`(auto-test) textarea upravena → očekávám seq-reparse na dalším akordu`);
+          }
+        }, 2000);
+      });
+
+      document.getElementById('btn-seq-stop').addEventListener('click', () => {
+        if (player) player.stop();
+        document.getElementById('btn-seq-start').disabled = false;
+        document.getElementById('btn-seq-stop').disabled  = true;
       });
     } catch (err) {
       console.error(err);
