@@ -1061,6 +1061,14 @@ export class PatternPlayer extends EventEmitter {
 
   setMuteSampler(sampler)        { this._muteSampler = sampler; }
 
+  /**
+   * Výměna hlavního guitar sampleru za běhu bez stopnutí přehrávání.
+   * Host (PatternLogic) to používá při swapu nástroje za běhu — nový sampler
+   * je cílový, ale stará pozice / pattern / sekvence pokračuje dál.
+   * Nezahazuje žádný state, jen přepne odkaz pro budoucí triggery.
+   */
+  setGuitarSampler(sampler) { this._guitarSampler = sampler; }
+
   // Veřejný getter na aktuální voicing (UI si může sáhnout pro fretboard render)
   get currentVoicing()  { return this._currentVoicing; }
   get currentPosition() { return this._currentPosition; }
