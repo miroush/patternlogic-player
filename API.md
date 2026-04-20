@@ -190,6 +190,26 @@ active text with the new signature (so `beats` per chord reflects the new
 `beatsPerMeasure`) and emits `seq-reparse` with `reason: 'timeSignature'`. If
 the current chord index falls outside the reparsed sequence, it clamps to `0`.
 
+### `setGuitarSampler(sampler)`
+
+Hot-swap the main guitar sampler without stopping playback. Useful when the
+host (PatternLogic, Vibechords) lets the user pick a different instrument
+mid-song and doesn't want to reset the step position, sequence progress, or
+loop boundary.
+
+The library stores the reference internally; the next triggered note uses the
+new sampler. Does not release in-flight notes on the old sampler — the host
+should call `oldSampler.releaseAll()` itself if it wants a clean cut (most
+often the fade from ring-until-next-hit is enough).
+
+### `setMuteSampler(sampler)`
+
+Hot-swap the palm-mute sampler (the one used when `event.technique ===
+'palm_mute'`). Pass `null` to disable palm-mute entirely — the library falls
+back to the main guitar sampler. Typical pattern: only set a real mute
+sampler for instruments that actually have a palm-mute layer (PatternLogic
+uses it for MDM-Strat sustain voices), everything else gets `null`.
+
 ---
 
 ## 7. Events

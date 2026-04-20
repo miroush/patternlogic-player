@@ -55,7 +55,8 @@ runnable end-to-end example covering all four milestones.
   boundary; `getDefaultPattern()` callback recompiles the editor pattern on
   every loop boundary.
 - **Hot-update** — `hotUpdatePattern(newPattern)`, `setBpm(n)`,
-  `setTimeSignature('3/4')` work during playback without stopping the
+  `setTimeSignature('3/4')`, `setGuitarSampler(sampler)`,
+  `setMuteSampler(sampler)` all work during playback without stopping the
   Transport.
 - **Event-based** — `chord`, `pattern`, `start`, `step`, `note`, `loop`,
   `stop`, `seq-start`, `seq-chord`, `seq-reparse`, `seq-loop`, `tick`, `bpm`,
