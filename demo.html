@@ -117,12 +117,33 @@
     <li>Živé re-parse textarey na akord boundary: <span id="chk-seq-reparse">…</span></li>
   </ul>
 
+  <h2>Step 4 — Hot-update za běhu</h2>
+  <p style="color:#666;font-size:13px;">
+    <code>hotUpdatePattern(newPat)</code> přehraje jiný pattern bez stopnutí — single-chord
+    recompiluje a zachová pozici (modulo), sekvence aktualizuje <code>_seqCurrentPattern</code>
+    a při dalším loop boundary se přepne. <code>setTimeSignature('3/4')</code> reparsuje
+    aktuální sekvenční text s novým podpisem (změní délku akordu z 4 na 3 doby).
+  </p>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;">
+    <button id="btn-hot-swap"    style="padding:.5rem 1rem;font-size:14px;cursor:pointer;" disabled>🔄 Hot-swap pattern (16n↔32n)</button>
+    <button id="btn-hot-ts44"    style="padding:.5rem 1rem;font-size:14px;cursor:pointer;" disabled>📏 4/4</button>
+    <button id="btn-hot-ts34"    style="padding:.5rem 1rem;font-size:14px;cursor:pointer;" disabled>📏 3/4</button>
+    <span style="font-size:12px;color:#666;">(aktivní po spuštění sekvence výše)</span>
+  </div>
+  <div id="hot-log" style="font-size:12px;color:#444;max-height:140px;overflow:auto;background:#f9f9f9;padding:.5rem;border-radius:4px;font-family:monospace;">
+    (log hot-update eventů)
+  </div>
+  <ul>
+    <li>Hot-swap patternu bez přerušení přehrávání: <span id="chk-hot-swap">…</span></li>
+    <li><code>setTimeSignature</code> za běhu sekvence reparsuje s novou délkou: <span id="chk-hot-ts">…</span></li>
+  </ul>
+
   <h2>Next milestones</h2>
   <ul>
     <li><s>Step 1: Pure utilities (voicing, pattern compile, sequence parser)</s> ✓</li>
     <li><s>Step 2: Single-chord playback (loadPattern, setChord, play, stop, events)</s> ✓</li>
     <li><s>Step 3: Chord sequence playback (playSequence, mix 16n/32n, live reparse)</s> ✓</li>
-    <li><strong>Step 4:</strong> Live BPM / pattern update</li>
+    <li><s>Step 4: Hot-update za běhu (hotUpdatePattern, setTimeSignature)</s> ✓</li>
   </ul>
 
   <script type="module">
@@ -480,6 +501,91 @@
         document.getElementById('btn-seq-start').disabled = false;
         document.getElementById('btn-seq-stop').disabled  = true;
       });
+
+      // ─── Step 4: Hot-update za běhu ──────────────────────────────────────
+      const hotLog = (msg) => {
+        const el = document.getElementById('hot-log');
+        const t = new Date().toLocaleTimeString();
+        el.textContent = `[${t}] ${msg}\n` + el.textContent;
+      };
+
+      // Sledujeme, jestli přehrávání skutečně nebylo přerušeno:
+      // - transport_state musí zůstat 'started'
+      // - po swapu musí přijít další 'step' event (scheduler pokračuje)
+      let hotSwapState = { stepsBeforeSwap: 0, stepsAfterSwap: 0, swapInvoked: false, transportState: null };
+      let hotTsState   = { reparseFired: false, newTimeSig: null };
+
+      // Globální listener na step — čítá tiky před a po swapu
+      const attachHotListeners = () => {
+        player.on('step', () => {
+          if (hotSwapState.swapInvoked) hotSwapState.stepsAfterSwap++;
+          else                          hotSwapState.stepsBeforeSwap++;
+        });
+        player.on('pattern', (p) => {
+          if (p.hot) hotLog(`pattern (hot): ${p.pattern.meta?.name || p.pattern.id} (${p.resolution}, loopLen=${p.loopLen})`);
+        });
+        player.on('seq-reparse', (p) => {
+          if (p.reason === 'timeSignature') {
+            hotTsState.reparseFired = true;
+            hotTsState.newTimeSig   = p.timeSignature;
+            hotLog(`seq-reparse (timeSignature=${p.timeSignature}): ${p.chords.length} akord(ů)`);
+          }
+        });
+      };
+
+      // Když klikneš Play sequence → povolit hot tlačítka a napojit listenery
+      const origSeqStart = document.getElementById('btn-seq-start').onclick;
+      document.getElementById('btn-seq-start').addEventListener('click', () => {
+        setTimeout(() => {
+          document.getElementById('btn-hot-swap').disabled = false;
+          document.getElementById('btn-hot-ts44').disabled = false;
+          document.getElementById('btn-hot-ts34').disabled = false;
+          // Reset stavu při novém startu
+          hotSwapState = { stepsBeforeSwap: 0, stepsAfterSwap: 0, swapInvoked: false };
+          hotTsState   = { reparseFired: false, newTimeSig: null };
+          if (player) attachHotListeners();
+        }, 200);
+      });
+      document.getElementById('btn-seq-stop').addEventListener('click', () => {
+        document.getElementById('btn-hot-swap').disabled = true;
+        document.getElementById('btn-hot-ts44').disabled = true;
+        document.getElementById('btn-hot-ts34').disabled = true;
+      });
+
+      document.getElementById('btn-hot-swap').addEventListener('click', () => {
+        if (!player) return;
+        const prev = player._currentPattern;
+        // Prohodí mezi 16n strum a 32n fingerpick podle toho, co právě hraje
+        const next = (prev === samplePattern) ? pat32 : samplePattern;
+        const prevTransport = Tone.Transport.state;
+        hotSwapState.swapInvoked = true;
+        hotLog(`hot-swap: ${prev.meta.name} → ${next.meta.name}`);
+        player.hotUpdatePattern(next);
+
+        // Po 400ms ověř, že scheduler nic nestopnul
+        setTimeout(() => {
+          const ok = Tone.Transport.state === 'started' &&
+                     prevTransport === 'started' &&
+                     hotSwapState.stepsAfterSwap > 0;
+          check('chk-hot-swap', ok,
+            ok ? `transport žije, +${hotSwapState.stepsAfterSwap} stepů po swapu`
+               : `transport=${Tone.Transport.state}, steps po swapu=${hotSwapState.stepsAfterSwap}`);
+        }, 400);
+      });
+
+      const applyTs = (ts) => {
+        if (!player) return;
+        hotTsState.reparseFired = false;
+        hotLog(`setTimeSignature('${ts}') — volání`);
+        player.setTimeSignature(ts);
+        // Reparse je synchronní (uvnitř setTimeSignature) → test hned
+        setTimeout(() => {
+          check('chk-hot-ts', hotTsState.reparseFired && hotTsState.newTimeSig === ts,
+            hotTsState.reparseFired ? `reparse s timeSig=${ts}` : 'reparse se nestal');
+        }, 100);
+      };
+      document.getElementById('btn-hot-ts44').addEventListener('click', () => applyTs('4/4'));
+      document.getElementById('btn-hot-ts34').addEventListener('click', () => applyTs('3/4'));
     } catch (err) {
       console.error(err);
       setStatus('Library failed to load: ' + err.message, false);

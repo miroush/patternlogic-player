@@ -954,9 +954,69 @@ export class PatternPlayer extends EventEmitter {
     });
   }
 
-  hotUpdatePattern(newPattern)   { throw new Error('hotUpdatePattern: not yet implemented (Step 4)'); }
+  /**
+   * Vymění pattern za běhu bez stopnutí přehrávání.
+   * - Mimo přehrávání: funguje jako loadPattern (reset state, emit 'pattern').
+   * - Single-chord za běhu: zachová pozici (`_currentStep % newLoopLen`), recompile.
+   *   Pokud se změnila resolution, přeplánuje scheduler (`Transport.clear` + nový `scheduleRepeat`).
+   * - Sekvence za běhu: aktualizuje `_seqCurrentPattern`, recompile. Scheduler zůstává
+   *   na 32n — `tickRatio` se přepočítá při dalším tiku, žádný reschedule není třeba.
+   *
+   * V obou případech emituje `pattern` event s `hot: true`.
+   * @param {object} newPattern - Nový pattern JSON
+   */
+  hotUpdatePattern(newPattern) {
+    if (!newPattern || !Array.isArray(newPattern.steps)) {
+      throw new Error('hotUpdatePattern: neplatný pattern (chybí steps)');
+    }
+    // Mimo přehrávání — stejné jako loadPattern (ale bez duplicity loglogiky)
+    if (!this._isPlaying && !this._isPlayingSequence) {
+      this.loadPattern(newPattern);
+      return;
+    }
+
+    const prevResolution = this._resolution;
+    const newResolution  = newPattern.resolution || '16n';
+    const newCompiled    = compilePattern(newPattern);
+
+    // Update state
+    this._currentPattern = newPattern;
+    this._compiled       = newCompiled;
+    this._resolution     = newResolution;
+    this._rmsScale = (newPattern.edit_bpm && newPattern.edit_bpm > 0)
+      ? (newPattern.edit_bpm / this._bpm) : 1;
+    if (this._isPlayingSequence) {
+      this._seqCurrentPattern = newPattern;
+      // U sekvence necháme `_seqStepInChord` být — scheduler si při příštím tiku
+      // spočítá stepInPattern z tickInLoop a nového tickRatio.
+    } else {
+      // Single-chord: zachovat pozici uvnitř nového loopu (modulo)
+      if (this._currentStep >= newCompiled.loopLen) {
+        this._currentStep = this._currentStep % newCompiled.loopLen;
+      }
+    }
+
+    // Single-chord: pokud se resolution změnila, přeplánovat scheduler
+    // (Tone.Transport.scheduleRepeat interval nejde změnit za běhu → clear + reschedule)
+    if (!this._isPlayingSequence && prevResolution !== newResolution && this._repeatId !== null) {
+      try { Tone.Transport.clear(this._repeatId); } catch {}
+      this._repeatId = Tone.Transport.scheduleRepeat(time => {
+        this._onTick(time);
+      }, newResolution);
+    }
+
+    this.emit('pattern', {
+      loopLen: newCompiled.loopLen,
+      resolution: newResolution,
+      pattern: newPattern,
+      hot: true,
+    });
+  }
 
   // ─── Runtime config ──────────────────────────────────────────────────────
+  /**
+   * Nastaví tempo za běhu (přepočítá rms škálu pro strum_delay, pokud pattern má edit_bpm).
+   */
   setBpm(bpm) {
     this._bpm = bpm;
     if (typeof Tone !== 'undefined' && Tone.Transport) Tone.Transport.bpm.value = bpm;
@@ -964,8 +1024,41 @@ export class PatternPlayer extends EventEmitter {
     if (this._currentPattern?.edit_bpm > 0) {
       this._rmsScale = this._currentPattern.edit_bpm / bpm;
     }
+    this.emit('bpm', { bpm });
   }
-  setTimeSignature(ts)           { this._timeSignature = ts; }
+
+  /**
+   * Nastaví časový podpis ('4/4' nebo '3/4'). Za běhu sekvence reparsuje aktuální text
+   * s novým podpisem (mění se `beats` akordů → fullMeasure = 4 nebo 3 beaty).
+   */
+  setTimeSignature(ts) {
+    if (ts !== '4/4' && ts !== '3/4') {
+      throw new Error(`setTimeSignature: nepodporovaný podpis "${ts}" (očekávám '4/4' nebo '3/4')`);
+    }
+    this._timeSignature = ts;
+
+    // Za běhu sekvence — reparse s novým timeSig, aby délka akordu odpovídala
+    if (this._isPlayingSequence && this._seqText) {
+      try {
+        const fresh = parseSequence(this._seqText, {
+          timeSignature: ts,
+          patNumMap: this._seqOpts?.patNumMap,
+        });
+        if (fresh.length) {
+          this._seqChords = fresh;
+          // Pokud je aktuální index mimo rozsah nové sekvence, clamp na začátek
+          if (this._seqChordIdx >= fresh.length) {
+            this._seqChordIdx    = 0;
+            this._seqStepInChord = 0;
+          }
+          this.emit('seq-reparse', { chords: [...fresh], reason: 'timeSignature', timeSignature: ts });
+        }
+      } catch (err) {
+        this.emit('error', { err, where: 'setTimeSignature reparse' });
+      }
+    }
+  }
+
   setMuteSampler(sampler)        { this._muteSampler = sampler; }
 
   // Veřejný getter na aktuální voicing (UI si může sáhnout pro fretboard render)
