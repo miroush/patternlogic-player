@@ -37,8 +37,9 @@ git submodule add https://github.com/miroush/patternlogic-player.git player
 </script>
 ```
 
-See [API.md](./API.md) for the full reference and [demo.html](./demo.html) for a
-runnable end-to-end example covering all four milestones.
+See [tutorial.html](./tutorial.html) for a step-by-step guide with live
+examples, [API.md](./API.md) for the full reference and [demo.html](./demo.html)
+for a sanity test page covering all four milestones.
 
 ## Feature summary
 

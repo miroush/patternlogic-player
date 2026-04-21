@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <title>patternlogic-player — tutoriál</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 4rem;
+      color: #1f2937;
+      line-height: 1.55;
+    }
+    h1 { margin: 0.25rem 0; }
+    .sub { color: #6b7280; margin: 0 0 1.5rem; }
+    h2 {
+      margin-top: 3rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 2px solid #e5e7eb;
+      color: #0f172a;
+    }
+    h3 { margin-top: 1.5rem; color: #1e40af; }
+    p { margin: 0.6rem 0; }
+    code {
+      background: #f3f4f6;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 90%;
+      color: #1e3a8a;
+    }
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 0.9rem 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0.5rem 0;
+    }
+    pre .kw  { color: #f472b6; }
+    pre .str { color: #fde68a; }
+    pre .num { color: #86efac; }
+    pre .com { color: #94a3b8; font-style: italic; }
+    pre .fn  { color: #60a5fa; }
+
+    .tldr {
+      background: #eff6ff;
+      border-left: 4px solid #2563eb;
+      padding: 0.6rem 0.9rem;
+      border-radius: 0 4px 4px 0;
+      margin: 0.7rem 0;
+      font-size: 14px;
+    }
+    .tldr strong { color: #1e40af; }
+
+    .note {
+      background: #fefce8;
+      border-left: 4px solid #ca8a04;
+      padding: 0.6rem 0.9rem;
+      border-radius: 0 4px 4px 0;
+      margin: 0.7rem 0;
+      font-size: 14px;
+    }
+    .warn {
+      background: #fef2f2;
+      border-left: 4px solid #dc2626;
+      padding: 0.6rem 0.9rem;
+      border-radius: 0 4px 4px 0;
+      margin: 0.7rem 0;
+      font-size: 14px;
+    }
+
+    .demo {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 0.9rem;
+      background: #f9fafb;
+      margin: 0.8rem 0;
+    }
+    .demo-head {
+      font-weight: bold;
+      font-size: 13px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.4rem;
+    }
+    button {
+      padding: 0.4rem 0.9rem;
+      font-size: 14px;
+      border: 1px solid #2563eb;
+      background: #2563eb;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 2px 4px 2px 0;
+    }
+    button:hover:not(:disabled) { background: #1d4ed8; }
+    button:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; }
+    button.sec {
+      background: white;
+      color: #2563eb;
+    }
+    button.sec:hover:not(:disabled) { background: #dbeafe; }
+    button.danger {
+      background: #dc2626;
+      border-color: #dc2626;
+    }
+    button.danger:hover:not(:disabled) { background: #b91c1c; }
+
+    input[type=range] { vertical-align: middle; }
+    input[type=text], textarea, select {
+      font-family: inherit;
+      font-size: 14px;
+      padding: 0.3rem 0.5rem;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+    }
+    textarea { font-family: monospace; width: 100%; box-sizing: border-box; }
+
+    .log {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 0.6rem 0.8rem;
+      border-radius: 4px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      max-height: 180px;
+      overflow-y: auto;
+      margin-top: 0.5rem;
+      white-space: pre-wrap;
+    }
+    .log:empty::before { content: "(zatím nic)"; color: #64748b; font-style: italic; }
+
+    table { border-collapse: collapse; font-size: 13px; margin: 0.5rem 0; width: 100%; }
+    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; color: #374151; }
+    td code { font-size: 12px; }
+
+    .global-controls {
+      position: sticky;
+      top: 0;
+      background: white;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid #e5e7eb;
+      z-index: 10;
+      margin-bottom: 1rem;
+    }
+    .toc {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 0.8rem 1rem;
+      margin: 1rem 0 2rem;
+    }
+    .toc ol { margin: 0.3rem 0; padding-left: 1.5rem; }
+    .toc a { color: #2563eb; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+
+    kbd {
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+    }
+  </style>
+</head>
+<body>
+
+<h1>patternlogic-player — tutoriál</h1>
+<p class="sub">Průvodce knihovnou krok za krokem s živými ukázkami. Všechno běží v prohlížeči, žádný build step.</p>
+
+<div class="global-controls">
+  <button id="stop-all" class="danger">⏹ Stop všechno (reset audio)</button>
+  <span style="font-size:12px;color:#6b7280;margin-left:8px;">Prohlížeč vyžaduje uživatelské kliknutí na zapnutí zvuku — první tlačítko "Přehrát" níže zároveň odemkne audio.</span>
+</div>
+
+<div class="toc">
+  <strong>Obsah:</strong>
+  <ol>
+    <li><a href="#intro">Úvod — co to je a pro koho</a></li>
+    <li><a href="#quickstart">Quick start — první zvuk za 15 řádků</a></li>
+    <li><a href="#voicing">Voicing engine — pure utilities</a></li>
+    <li><a href="#singlechord">Single-chord přehrávání</a></li>
+    <li><a href="#sequence">Sekvence akordů</a></li>
+    <li><a href="#hotupdate">Hot-update za běhu</a></li>
+    <li><a href="#events">Eventy — kompletní reference</a></li>
+    <li><a href="#integration">Integrační sketch pro editor</a></li>
+    <li><a href="#whatsnext">Co zatím chybí a co přijde</a></li>
+  </ol>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="intro">1. Úvod — co to je a pro koho</h2>
+
+<p><strong>patternlogic-player</strong> je JavaScriptová knihovna, která ti umožní přehrávat kytarové patterny (rozepsané jako JSON) s reálnými samply nebo synťákem. Postavená na <a href="https://tonejs.github.io/">Tone.js v14</a>.</p>
+
+<div class="tldr"><strong>Pro koho:</strong> pro aplikace, které chtějí hrát kytarové doprovody nad posloupností akordů. PatternLogic (knihovna patternů + editor) a Vibechords (chord progression player) ji obě používají. Knihovna je univerzální — umí jakýkoliv Tone.Sampler.</p></div>
+
+<h3>Co knihovna řeší za tebe</h3>
+<ul>
+  <li><strong>Voicing engine</strong> — spočítá, jaké noty zahrát na kterých strunách pro daný akord v daném tvaru (E-barre / A-barre / oktáva výš).</li>
+  <li><strong>Pattern scheduler</strong> — přehraje pattern (16 nebo 32 kroků) v zadaném tempu, s humanizací (rozkmit velocity, timing, strum delay).</li>
+  <li><strong>Sequence scheduler</strong> — přehraje celý chord progression (<code>C G Am F</code>) a zvládá i mix 16n a 32n patternů v jedné sekvenci.</li>
+  <li><strong>Hot-update</strong> — za běhu ti přepne pattern, tempo, taktový podpis nebo i celý nástroj bez stopu přehrávání.</li>
+  <li><strong>Eventy</strong> — 14 eventů (step, note, loop, chord, …), na které si v hostovské appce navěsíš UI glue (zvýrazňování, highlight, metronom).</li>
+</ul>
+
+<h3>Co knihovna NEŘEŠÍ</h3>
+<ul>
+  <li><strong>UI</strong> — fretboard, step indikátor, editor patternu. To je práce hostující aplikace.</li>
+  <li><strong>Basa</strong> — zatím zůstává v hostu (PatternLogic má inline bass engine). Migrace do knihovny je plánovaná.</li>
+  <li><strong>Efektový řetězec</strong> — EQ, reverb, cab IR. Nasypeš samplerem, kam chceš (už prošlou přes efekty).</li>
+  <li><strong>Sampling</strong> — samotné zvukové samply si přineseš jako <code>Tone.Sampler</code>. Knihovna je agnostická.</li>
+</ul>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="quickstart">2. Quick start — první zvuk za 15 řádků</h2>
+
+<p>Minimální kód, který hraje C dur pattern. Místo reálného sampleru použijeme <code>Tone.PolySynth</code> (stejné API, žádný download samplů).</p>
+
+<pre><span class="com">// 1. Importuj knihovnu (ES module)</span>
+<span class="kw">import</span> { <span class="fn">PatternPlayer</span> } <span class="kw">from</span> <span class="str">'./pattern-player.js'</span>;
+
+<span class="com">// 2. Udělej "sampler" — synth jako náhrada (má stejné API jako Tone.Sampler)</span>
+<span class="kw">const</span> synth = <span class="kw">new</span> Tone.<span class="fn">PolySynth</span>(Tone.Synth).<span class="fn">toDestination</span>();
+<span class="kw">await</span> Tone.<span class="fn">start</span>(); <span class="com">// vyžaduje klik uživatele</span>
+
+<span class="com">// 3. Vytvoř playera a pattern</span>
+<span class="kw">const</span> player = <span class="kw">new</span> <span class="fn">PatternPlayer</span>({ guitarSampler: synth, bpm: <span class="num">100</span> });
+<span class="kw">const</span> pattern = {
+  id: <span class="str">'hello'</span>,
+  loop_steps: <span class="num">16</span>,
+  resolution: <span class="str">'16n'</span>,
+  meta: { style: <span class="str">'strum'</span> },
+  steps: [
+    { beat: <span class="str">'1'</span>, strings: [<span class="str">'bass_root'</span>, <span class="num">4</span>, <span class="num">3</span>, <span class="num">2</span>, <span class="num">1</span>], direction: <span class="str">'D'</span>, duration: <span class="str">'4n'</span> },
+    { beat: <span class="str">'3'</span>, strings: [<span class="str">'bass_alt'</span>,  <span class="num">4</span>, <span class="num">3</span>, <span class="num">2</span>, <span class="num">1</span>], direction: <span class="str">'D'</span>, duration: <span class="str">'4n'</span> }
+  ]
+};
+
+<span class="com">// 4. Spusť</span>
+player.<span class="fn">setChord</span>({ root: <span class="str">'C'</span>, quality: <span class="str">'maj'</span> });
+player.<span class="fn">loadPattern</span>(pattern);
+player.<span class="fn">play</span>();</pre>
+
+<div class="demo">
+  <div class="demo-head">Živá ukázka</div>
+  <button id="qs-play">▶ Přehrát C dur (Quick start)</button>
+  <button id="qs-stop" class="sec" disabled>■ Stop</button>
+  <div class="log" id="qs-log"></div>
+</div>
+
+<div class="note"><strong>Co se právě stalo:</strong> knihovna si z akordu <code>C:maj</code> spočítala E-tvar na 8. pražci (C dur bez otevřených strun), voicing pro každou strunu a pattern scheduler začal triggerovat tóny na dobu 1 a 3. Strum delay (20 ms) a ring-until-next-hit (nota drží, dokud neudeří další) jsou zapnuté by default.</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="voicing">3. Voicing engine — pure utilities</h2>
+
+<p>Pod kapotou knihovny jsou čisté matematické funkce, které ti přepočítají abstraktní popis akordu na konkrétní noty. <strong>Nepotřebují audio context</strong> — můžeš je volat i bez Tone.js, jsou to jen výpočty.</p>
+
+<h3>getAllPositions — všechny hratelné pozice akordu</h3>
+
+<pre><span class="kw">import</span> { <span class="fn">getAllPositions</span> } <span class="kw">from</span> <span class="str">'./pattern-player.js'</span>;
+
+<span class="kw">const</span> positions = <span class="fn">getAllPositions</span>({ root: <span class="str">'C'</span>, quality: <span class="str">'maj'</span> });
+<span class="com">// [
+//   { shape: 'E', barFret: 8,  baseNote: 'C3', ... },
+//   { shape: 'A', barFret: 3,  baseNote: 'C3', ... },
+//   { shape: 'E', barFret: 20, ... }  // pokud vejde (≤ 15. pražec default)
+// ]</span></pre>
+
+<p>Každá pozice má <code>shape</code> (E/A), <code>barFret</code> (kde leží barre), <code>baseNote</code> (nota na bass struně) a další metadata. Aplikace může uživateli nabídnout výběr pozice (PatternLogic kreslí všechny na hmatník a nechá kliknout).</p>
+
+<h3>generateVoicing — noty pro všech 6 strun</h3>
+
+<pre><span class="kw">import</span> { <span class="fn">generateVoicing</span> } <span class="kw">from</span> <span class="str">'./pattern-player.js'</span>;
+
+<span class="kw">const</span> pos = positions[<span class="num">0</span>]; <span class="com">// E-tvar, 8. pražec</span>
+<span class="kw">const</span> voicing = <span class="fn">generateVoicing</span>(pos, <span class="str">'maj'</span>);
+<span class="com">// {
+//   1: 'C5', 2: 'G4', 3: 'E4', 4: 'C4', 5: 'G3', 6: 'C3',
+//   bass_root: 'C3', bass_alt: 'G3'
+// }</span></pre>
+
+<p>Klíče <code>1–6</code> jsou fyzické struny (1 = vysoké e). <code>bass_root</code> a <code>bass_alt</code> jsou abstraktní reference (hodí se pro basové patterny, které nevědí, jestli hrajou E nebo A tvar).</p>
+
+<h3>resolveStrings — abstraktní → fyzické struny</h3>
+
+<pre><span class="kw">import</span> { <span class="fn">resolveStrings</span> } <span class="kw">from</span> <span class="str">'./pattern-player.js'</span>;
+
+<span class="fn">resolveStrings</span>([<span class="str">'bass_root'</span>, <span class="num">4</span>, <span class="num">3</span>], <span class="str">'E'</span>); <span class="com">// [6, 4, 3]</span>
+<span class="fn">resolveStrings</span>([<span class="str">'bass_root'</span>, <span class="num">4</span>, <span class="num">3</span>], <span class="str">'A'</span>); <span class="com">// [5, 4, 3]</span></pre>
+
+<div class="demo">
+  <div class="demo-head">Živá ukázka — spočítat voicing bez přehrávání</div>
+  <label>Root:
+    <select id="v-root">
+      <option>C</option><option>D</option><option>E</option><option>F</option>
+      <option>G</option><option>A</option><option>B</option>
+    </select>
+  </label>
+  <label>Kvalita:
+    <select id="v-qual">
+      <option value="maj">maj</option><option value="min">min</option>
+      <option value="dom7">dom7</option><option value="maj7">maj7</option>
+      <option value="min7">min7</option><option value="sus4">sus4</option>
+    </select>
+  </label>
+  <button id="v-calc" class="sec">Spočítat voicing</button>
+  <pre id="v-out" style="margin-top:0.5rem;">(výstup)</pre>
+</div>
+
+<div class="tldr"><strong>Proč pure utilities?</strong> Můžeš je použít i v contextu, kde zvuk nehraješ — třeba v generátoru notových materiálů, MIDI exportu, nebo jen pro vizualizaci hmatníku.</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="singlechord">4. Single-chord přehrávání</h2>
+
+<p>Typický use case: uživatel má vybraný jeden akord a loopuje jeden pattern dokola (kytarový editor, metronom pro cvičení).</p>
+
+<h3>Konstruktor + základní ovládání</h3>
+
+<pre><span class="kw">const</span> player = <span class="kw">new</span> <span class="fn">PatternPlayer</span>({
+  guitarSampler: mySampler,        <span class="com">// REQUIRED — Tone.Sampler instance</span>
+  muteSampler: myMuteSampler,      <span class="com">// optional — palm-mute varianta</span>
+  bpm: <span class="num">100</span>,
+  timeSignature: <span class="str">'4/4'</span>,            <span class="com">// '4/4' nebo '3/4'</span>
+  humanization: {
+    velVariance: <span class="num">0.08</span>,            <span class="com">// rozkmit velocity 0–1</span>
+    accentStrength: <span class="num">0.15</span>,
+    timingVarianceMs: <span class="num">5</span>             <span class="com">// rozkmit timingu ± ms</span>
+  }
+});
+
+player.<span class="fn">setChord</span>({ root: <span class="str">'G'</span>, quality: <span class="str">'maj'</span>, shape: <span class="str">'auto'</span>, shapeOctave: <span class="num">1</span> });
+player.<span class="fn">loadPattern</span>(myPattern);
+player.<span class="fn">play</span>();
+<span class="com">// … user kliká na různé akordy …</span>
+player.<span class="fn">setChord</span>({ root: <span class="str">'D'</span>, quality: <span class="str">'min'</span> }); <span class="com">// přepne za běhu</span>
+player.<span class="fn">stop</span>();</pre>
+
+<h3>Eventy, které ti přijdou</h3>
+
+<ul>
+  <li><code>chord</code> — při každém <code>setChord()</code>. Payload: <code>{ root, quality, shape, barFret, voicing, position }</code>.</li>
+  <li><code>pattern</code> — při <code>loadPattern</code> nebo <code>hotUpdatePattern</code>. Payload: <code>{ loopLen, resolution, pattern }</code>.</li>
+  <li><code>start</code>, <code>stop</code>, <code>loop</code> — hranice přehrávání.</li>
+  <li><code>step</code> — každý tick scheduleru. Payload: <code>{ step, loopLen, time, resolution }</code>. Používá se na step indikátor a metronom.</li>
+  <li><code>note</code> — každý trigger noty. Payload: <code>{ notes, vel, dur, strings, technique, direction, time, event }</code>. Používá se na highlight strun.</li>
+  <li><code>error</code> — při neplatné notě nebo jiné chybě.</li>
+</ul>
+
+<div class="demo">
+  <div class="demo-head">Živá ukázka — single-chord s eventy</div>
+  <label>Akord:
+    <select id="sc-chord">
+      <option value="C:maj">C dur</option>
+      <option value="G:maj">G dur</option>
+      <option value="A:min">a moll</option>
+      <option value="F:maj">F dur</option>
+      <option value="D:dom7">D7</option>
+      <option value="E:min7">Em7</option>
+    </select>
+  </label>
+  <label>BPM: <input id="sc-bpm" type="range" min="60" max="160" value="100"> <span id="sc-bpm-val">100</span></label>
+  <br>
+  <button id="sc-play">▶ Přehrát</button>
+  <button id="sc-stop" class="sec" disabled>■ Stop</button>
+  <div class="log" id="sc-log"></div>
+</div>
+
+<div class="note"><strong>Strum pattern použitý v demu:</strong> klasický 4-úderový strum (D — D U — D — D U) přes 16 kroků, 4n ring, strum delay 20 ms. Když změníš akord za běhu, knihovna přepne voicing hned (na dalším triggeru).</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="sequence">5. Sekvence akordů</h2>
+
+<p>Druhý režim: uživatel zapíše posloupnost akordů jako text a knihovna je přehraje jeden za druhým. Pro chord progressions (<code>C G Am F</code>), songy, cvičení.</p>
+
+<h3>Notace sekvence</h3>
+
+<table>
+  <thead><tr><th>Zápis</th><th>Význam</th></tr></thead>
+  <tbody>
+    <tr><td><code>A</code></td><td>A dur, celý takt (4 doby ve 4/4)</td></tr>
+    <tr><td><code>Am</code></td><td>a moll, celý takt</td></tr>
+    <tr><td><code>Amin7</code>, <code>Gsus4</code></td><td>kvalita za rootem</td></tr>
+    <tr><td><code>C.</code></td><td>C dur, půl taktu (2 doby)</td></tr>
+    <tr><td><code>G..</code></td><td>G dur, 1 doba</td></tr>
+    <tr><td><code>G...</code></td><td>G dur, 1/2 doby</td></tr>
+    <tr><td><code>Am(001)</code></td><td>A moll, pattern s kódem <code>001</code></td></tr>
+    <tr><td><code>F(e)</code> / <code>F(a)</code></td><td>F dur v E-tvaru / A-tvaru</td></tr>
+    <tr><td><code>G(a2)</code></td><td>G dur v A-tvaru o oktávu výš</td></tr>
+    <tr><td><code>C.(abc e)</code></td><td>C dur, půl taktu, pattern <code>abc</code>, E-tvar</td></tr>
+  </tbody>
+</table>
+
+<h3>playSequence API</h3>
+
+<pre>player.<span class="fn">playSequence</span>(<span class="str">'C G Am F'</span>, {
+  defaultPattern: myPattern,                <span class="com">// REQUIRED (nebo getDefaultPattern)</span>
+  loop: <span class="kw">true</span>,                             <span class="com">// loopovat celou sekvenci (default true)</span>
+  timeSignature: <span class="str">'4/4'</span>,                   <span class="com">// '4/4' nebo '3/4'</span>
+  patNumMap: { <span class="str">'001'</span>: <span class="str">'pattern-uuid-1'</span> }, <span class="com">// kód → id pro lookup</span>
+  getPattern: (id) =&gt; PATTERNS.find(p =&gt; p.id === id),
+  getText: () =&gt; textarea.value,            <span class="com">// živě reparse textu na chord boundary</span>
+  getDefaultPattern: () =&gt; editorGetPattern() <span class="com">// živě recompile patternu na loop</span>
+});</pre>
+
+<h3>Callbacky pro živé změny</h3>
+
+<ul>
+  <li><code>getText()</code> — knihovna na hranici každého akordu volá a porovná s minulým textem. Pokud se liší, reparsuje a od následujícího akordu hraje podle nové verze. Uživatel píše do textarey a změny se projeví postupně.</li>
+  <li><code>getDefaultPattern()</code> — na hranici každého loopu volá a přenačte pattern. Uživatel edituje v editoru a změny se projeví od dalšího taktu.</li>
+</ul>
+
+<h3>Eventy specifické pro sekvenci</h3>
+
+<ul>
+  <li><code>seq-start</code> — payload: <code>{ chords, loop }</code>.</li>
+  <li><code>seq-chord</code> — přechod na další akord. Payload: <code>{ chord, index }</code>.</li>
+  <li><code>seq-reparse</code> — text se změnil. Payload: <code>{ chords, reason? }</code>.</li>
+  <li><code>seq-loop</code> — sekvence se vrátila na první akord.</li>
+  <li><code>step</code>, <code>note</code>, <code>loop</code>, <code>pattern</code> mají navíc <code>sequence: true</code> ve payloadu, abys v handleru odlišil.</li>
+</ul>
+
+<div class="demo">
+  <div class="demo-head">Živá ukázka — sekvence s live reparse</div>
+  <textarea id="seq-text" rows="2">C G Am F</textarea>
+  <br>
+  <button id="seq-play" style="margin-top:0.4rem;">▶ Přehrát sekvenci</button>
+  <button id="seq-stop" class="sec" disabled>■ Stop</button>
+  <label><input id="seq-loop" type="checkbox" checked> Loop</label>
+  <div style="margin-top:0.4rem;font-size:13px;color:#6b7280;">Tip: během přehrávání přepiš textareu na <code>E A D G</code> — změna se projeví na hranici dalšího akordu.</div>
+  <div class="log" id="seq-log"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="hotupdate">6. Hot-update za běhu</h2>
+
+<p>Knihovna umí přepínat parametry bez stopnutí Transportu a restartu scheduleru. Využitelné v aplikacích, kde user hýbe slidery nebo edituje pattern a chce slyšet změny okamžitě.</p>
+
+<h3>hotUpdatePattern(newPattern)</h3>
+
+<p>Přepne aktuálně hrající pattern za jiný. Zachová si pozici (u single-chord modulo přes nový <code>loopLen</code>, u sekvence se přepne na dalším loop boundary). Pokud se změní <code>resolution</code> (16n ↔ 32n), scheduler se automaticky překreslí.</p>
+
+<pre>player.<span class="fn">hotUpdatePattern</span>(newPat);
+<span class="com">// Event 'pattern' s hot: true ti přijde, ať víš, že to byl hot swap</span></pre>
+
+<h3>setBpm(n)</h3>
+
+<p>Změní tempo. Transport se přeladí okamžitě, strum delay se přeškáluje podle <code>edit_bpm / playback_bpm</code>.</p>
+
+<h3>setTimeSignature(ts)</h3>
+
+<p>'4/4' nebo '3/4'. Pokud právě hraje sekvence, reparsuje se aktuální text s novým podpisem (v 3/4 má akord bez teček 3 doby místo 4). Emituje <code>seq-reparse</code> s <code>reason: 'timeSignature'</code>.</p>
+
+<h3>setGuitarSampler / setMuteSampler</h3>
+
+<p>Výměna nástroje za běhu. Knihovna od dalšího triggeru volá nový sampler. Doznívající noty na starém sampleru dohrají — pokud chceš tvrdé cutoff, zavolej <code>oldSampler.releaseAll()</code>.</p>
+
+<div class="demo">
+  <div class="demo-head">Živá ukázka — hot-update kombinací</div>
+  <button id="hot-start">▶ Spustit (C dur strum)</button>
+  <button id="hot-stop" class="sec" disabled>■ Stop</button>
+  <hr style="margin:0.6rem 0;border:none;border-top:1px solid #e5e7eb;">
+  <div style="margin:0.4rem 0;">
+    <button id="hot-swap-pat" disabled>🔄 Hot-swap pattern (16n ↔ 32n fingerpick)</button>
+  </div>
+  <div style="margin:0.4rem 0;">
+    <button id="hot-bpm-slow" disabled>🐌 80 BPM</button>
+    <button id="hot-bpm-fast" disabled>🏃 140 BPM</button>
+  </div>
+  <div class="log" id="hot-log"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="events">7. Eventy — kompletní reference</h2>
+
+<p>Kompletní seznam eventů, které emituje <code>PatternPlayer</code>. Registrace přes <code>player.on(name, handler)</code>, odregistrace <code>player.off(name, handler?)</code> (bez handleru smaže všechny).</p>
+
+<table>
+  <thead>
+    <tr><th>Event</th><th>Kdy se emituje</th><th>Payload</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>chord</code></td>
+      <td>Po každém <code>setChord()</code> (i implicitním na začátku sekvence)</td>
+      <td><code>{ root, quality, shape, barFret, voicing, position }</code></td>
+    </tr>
+    <tr>
+      <td><code>pattern</code></td>
+      <td><code>loadPattern</code> nebo <code>hotUpdatePattern</code></td>
+      <td><code>{ loopLen, resolution, pattern, hot?: true, sequence?: true }</code></td>
+    </tr>
+    <tr>
+      <td><code>start</code></td>
+      <td>Po <code>play()</code> nebo <code>playSequence()</code></td>
+      <td><code>{ time, sequence?: true }</code></td>
+    </tr>
+    <tr>
+      <td><code>stop</code></td>
+      <td>Po <code>stop()</code> nebo po doběhnutí sekvence bez loopu</td>
+      <td><code>{ sequence }</code></td>
+    </tr>
+    <tr>
+      <td><code>step</code></td>
+      <td>Každý tick scheduleru (16n nebo 32n dle patternu)</td>
+      <td><code>{ step, loopLen, time, resolution, sequence?, chordIndex? }</code></td>
+    </tr>
+    <tr>
+      <td><code>note</code></td>
+      <td>Každý trigger noty (včetně strun v jednom strumu)</td>
+      <td><code>{ notes, vel, dur, strings, technique, direction, time, event, sequence? }</code></td>
+    </tr>
+    <tr>
+      <td><code>loop</code></td>
+      <td>Pattern/sekvence se vrátila na začátek</td>
+      <td><code>{ time }</code></td>
+    </tr>
+    <tr>
+      <td><code>bpm</code></td>
+      <td>Po <code>setBpm()</code></td>
+      <td><code>{ bpm }</code></td>
+    </tr>
+    <tr>
+      <td><code>error</code></td>
+      <td>Chyba v triggeru (sampler selhal, neplatná nota)</td>
+      <td><code>{ err, note?, event?, where? }</code></td>
+    </tr>
+    <tr>
+      <td><code>tick</code></td>
+      <td>Granulární tick v sekvenci (32n grid)</td>
+      <td><code>{ rawTick, time }</code></td>
+    </tr>
+    <tr>
+      <td><code>seq-start</code></td>
+      <td>Po <code>playSequence()</code></td>
+      <td><code>{ chords, loop }</code></td>
+    </tr>
+    <tr>
+      <td><code>seq-chord</code></td>
+      <td>Přechod na další akord sekvence</td>
+      <td><code>{ chord, index }</code></td>
+    </tr>
+    <tr>
+      <td><code>seq-reparse</code></td>
+      <td>Text se změnil nebo setTimeSignature za běhu</td>
+      <td><code>{ chords, reason?, timeSignature? }</code></td>
+    </tr>
+    <tr>
+      <td><code>seq-loop</code></td>
+      <td>Sekvence se vrátila na první akord</td>
+      <td><code>{ time }</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="integration">8. Integrační sketch pro editor</h2>
+
+<p>Typický use case v hostující aplikaci (PatternLogic, Vibechords): editor patternu + sekvence textarea + hot-update bez stopnutí přehrávání. Tady je minimální integrace.</p>
+
+<pre><span class="com">// Stát hostu</span>
+<span class="kw">let</span> player = <span class="kw">null</span>;
+<span class="kw">const</span> PATTERNS = [<span class="com">/* pole JSON patternů */</span>];
+<span class="kw">const</span> patNumMap = { <span class="str">'001'</span>: <span class="str">'my-strum'</span>, <span class="str">'002'</span>: <span class="str">'my-fp'</span> };
+
+<span class="com">// Helpery ke čtení UI</span>
+<span class="kw">function</span> <span class="fn">editorGetPattern</span>() {
+  <span class="com">// … vybere rows z editoru, vrátí JSON pattern</span>
+  <span class="kw">return</span> { <span class="com">/* ... */</span> };
+}
+
+<span class="com">// Start sekvence</span>
+document.<span class="fn">getElementById</span>(<span class="str">'play-seq'</span>).<span class="fn">addEventListener</span>(<span class="str">'click'</span>, <span class="kw">async</span> () =&gt; {
+  <span class="kw">await</span> Tone.<span class="fn">start</span>();
+  <span class="kw">if</span> (!player) {
+    player = <span class="kw">new</span> <span class="fn">PatternPlayer</span>({ guitarSampler: mySampler, bpm: <span class="num">100</span> });
+    player.<span class="fn">on</span>(<span class="str">'seq-chord'</span>, ({ chord, index }) =&gt; highlightChordChip(index));
+    player.<span class="fn">on</span>(<span class="str">'step'</span>, ({ step }) =&gt; updateStepIndicator(step));
+    player.<span class="fn">on</span>(<span class="str">'stop'</span>, () =&gt; resetUI());
+  }
+
+  player.<span class="fn">playSequence</span>(document.<span class="fn">getElementById</span>(<span class="str">'seq-input'</span>).value, {
+    defaultPattern: <span class="fn">editorGetPattern</span>(),
+    getPattern: (id) =&gt; PATTERNS.<span class="fn">find</span>(p =&gt; p.id === id),
+    getText: () =&gt; document.<span class="fn">getElementById</span>(<span class="str">'seq-input'</span>).value,
+    getDefaultPattern: () =&gt; <span class="fn">editorGetPattern</span>(),
+    patNumMap,
+    loop: <span class="kw">true</span>,
+  });
+});
+
+<span class="com">// Hot-update z Apply tlačítka v editoru</span>
+document.<span class="fn">getElementById</span>(<span class="str">'apply'</span>).<span class="fn">addEventListener</span>(<span class="str">'click'</span>, () =&gt; {
+  <span class="kw">if</span> (player &amp;&amp; player._isPlaying) {
+    player.<span class="fn">hotUpdatePattern</span>(<span class="fn">editorGetPattern</span>());
+  }
+});
+
+<span class="com">// BPM slider</span>
+document.<span class="fn">getElementById</span>(<span class="str">'bpm'</span>).<span class="fn">addEventListener</span>(<span class="str">'input'</span>, (e) =&gt; {
+  player?.<span class="fn">setBpm</span>(+e.target.value);
+});</pre>
+
+<div class="tldr"><strong>Klíč je oddělení:</strong> knihovna si řeší scheduler, voicing, timing, ringy. Hostující aplikace jen dodává data (pattern, text sekvence, sampler) a přes callbacky reaguje na eventy (highlight, stav tlačítek). Hosta neřídí knihovna, knihovna čte hosta přes callbacky.</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="whatsnext">9. Co zatím chybí a co přijde</h2>
+
+<h3>Aktuálně v knihovně NEJSOU</h3>
+
+<ul>
+  <li><strong>Bass engine</strong> — basový nástroj s vlastními basovými patterny (pattern s <code>instrument: 'bass'</code>, triggery přes <code>Tone.MonoSynth</code> nebo bass sampler). V PatternLogic zůstává jako paralelní inline <code>scheduleRepeat</code>. Plánovaná migrace do knihovny: jedna vlna, výsledek bude unifikovaný scheduler pro kytaru + basu v jedné instanci <code>PatternPlayer</code>.</li>
+  <li><strong>Piano / drums engines</strong> — formát patternu to umí (<code>meta.instrument: 'piano'</code>), ale voicing engine pro klávesy není implementovaný. Piano patterny neřeší E/A tvar, potřebují vlastní voicingová pravidla.</li>
+  <li><strong>Multi-track mix</strong> — hrát víc patternů nad jedním akordem současně (kytara + basa + perkuse). V plánu.</li>
+</ul>
+
+<h3>Kam se knihovna vyvíjí</h3>
+
+<ul>
+  <li>Bass engine (priorita 1 — odbourá dnešní duplicitu v PatternLogic hostu)</li>
+  <li>Uvolnění stabilní 1.0 po dokončení bass migrace + real-world usage ve Vibechords</li>
+  <li>Piano engine (priorita 2, na vyžádání)</li>
+</ul>
+
+<p style="margin-top:2rem;color:#6b7280;font-size:13px;">Dotazy, bugy, návrhy: <a href="https://github.com/miroush/patternlogic-player/issues">GitHub issues</a>. API reference: <a href="./API.md">API.md</a>.</p>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+
+<script type="module">
+  import {
+    PatternPlayer,
+    getAllPositions,
+    generateVoicing,
+    resolveStrings,
+  } from './pattern-player.js';
+
+  // ─── Globální state pro všechny kapitoly ───────────────────────────────
+  let synth = null;
+  let activePlayer = null;  // jeden aktivní v celém tutoriálu
+
+  const initSynth = async () => {
+    await Tone.start();
+    if (!synth) {
+      synth = new Tone.PolySynth(Tone.Synth, {
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1.2 },
+        oscillator: { type: 'triangle' },
+      }).toDestination();
+      synth.volume.value = -12;
+    }
+  };
+
+  const stopEverything = () => {
+    try { activePlayer?.stop(); } catch {}
+    try { synth?.releaseAll(); } catch {}
+    activePlayer = null;
+    // reset všech tlačítek v demech
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.id.endsWith('-stop') || btn.id === 'hot-swap-pat' || btn.id === 'hot-bpm-slow' || btn.id === 'hot-bpm-fast') {
+        btn.disabled = true;
+      } else if (btn.id.endsWith('-play') || btn.id === 'qs-play' || btn.id === 'sc-play' || btn.id === 'seq-play' || btn.id === 'hot-start') {
+        btn.disabled = false;
+      }
+    });
+  };
+
+  document.getElementById('stop-all').addEventListener('click', stopEverything);
+
+  const makeLog = (elId) => (msg) => {
+    const el = document.getElementById(elId);
+    const t = new Date().toLocaleTimeString('cs-CZ');
+    el.textContent = `[${t}] ${msg}\n` + el.textContent;
+    // cap size
+    if (el.textContent.length > 5000) el.textContent = el.textContent.slice(0, 4500);
+  };
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Quick start demo (kapitola 2)
+  // ═════════════════════════════════════════════════════════════════════════
+  const quickStartPattern = {
+    id: 'qs-strum',
+    loop_steps: 16,
+    resolution: '16n',
+    edit_bpm: 100,
+    meta: { style: 'strum' },
+    humanization: { strum_delay_ms: 20 },
+    steps: [
+      { beat: '1', strings: ['bass_root', 4, 3, 2, 1], direction: 'D', vel: 0.9, duration: '4n' },
+      { beat: '3', strings: ['bass_alt',  4, 3, 2, 1], direction: 'D', vel: 0.85, duration: '4n' }
+    ]
+  };
+
+  const qsLog = makeLog('qs-log');
+  document.getElementById('qs-play').addEventListener('click', async () => {
+    stopEverything();
+    await initSynth();
+    qsLog('Vytvářím PatternPlayer…');
+    activePlayer = new PatternPlayer({ guitarSampler: synth, bpm: 100 });
+    activePlayer.on('note', ({ notes }) => qsLog(`note: ${notes.join(', ')}`));
+    activePlayer.on('loop', () => qsLog('loop'));
+    activePlayer.setChord({ root: 'C', quality: 'maj' });
+    activePlayer.loadPattern(quickStartPattern);
+    activePlayer.play();
+    qsLog('play() zavolán');
+    document.getElementById('qs-play').disabled = true;
+    document.getElementById('qs-stop').disabled = false;
+  });
+  document.getElementById('qs-stop').addEventListener('click', stopEverything);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Voicing kalkulátor (kapitola 3)
+  // ═════════════════════════════════════════════════════════════════════════
+  document.getElementById('v-calc').addEventListener('click', () => {
+    const root = document.getElementById('v-root').value;
+    const qual = document.getElementById('v-qual').value;
+    try {
+      const positions = getAllPositions({ root, quality: qual });
+      const pos0 = positions[0];
+      const voicing = generateVoicing(pos0, qual);
+      const resolved = resolveStrings(['bass_root', 'bass_alt', 3, 2, 1], pos0.shape);
+      const out = {
+        vybrana_pozice: { shape: pos0.shape, barFret: pos0.barFret, baseNote: pos0.baseNote },
+        voicing,
+        resolveStrings_priklad: {
+          input: ['bass_root', 'bass_alt', 3, 2, 1],
+          output: resolved
+        },
+        vsechny_pozice: positions.map(p => ({ shape: p.shape, barFret: p.barFret }))
+      };
+      document.getElementById('v-out').textContent = JSON.stringify(out, null, 2);
+    } catch (e) {
+      document.getElementById('v-out').textContent = 'Chyba: ' + e.message;
+    }
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Single-chord demo (kapitola 4)
+  // ═════════════════════════════════════════════════════════════════════════
+  const scPattern = {
+    id: 'sc-strum',
+    loop_steps: 16,
+    resolution: '16n',
+    edit_bpm: 100,
+    meta: { style: 'strum' },
+    humanization: { strum_delay_ms: 20, vel_variance: 0.1 },
+    steps: [
+      { beat: '1',  strings: ['bass_root', 4, 3, 2, 1], direction: 'D', vel: 0.9,  duration: '4n' },
+      { beat: '2',  strings: [6, 4, 3, 2, 1],           direction: 'D', vel: 0.7,  duration: '4n' },
+      { beat: '2+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6,  duration: '8n' },
+      { beat: '3',  strings: ['bass_alt',  4, 3, 2, 1], direction: 'D', vel: 0.85, duration: '4n' },
+      { beat: '4',  strings: [6, 4, 3, 2, 1],           direction: 'D', vel: 0.7,  duration: '4n' },
+      { beat: '4+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6,  duration: '8n' },
+    ]
+  };
+
+  const scLog = makeLog('sc-log');
+
+  document.getElementById('sc-bpm').addEventListener('input', (e) => {
+    const v = +e.target.value;
+    document.getElementById('sc-bpm-val').textContent = v;
+    if (activePlayer) activePlayer.setBpm(v);
+  });
+
+  document.getElementById('sc-chord').addEventListener('change', (e) => {
+    if (!activePlayer) return;
+    const [root, quality] = e.target.value.split(':');
+    activePlayer.setChord({ root, quality });
+    scLog(`setChord: ${root} ${quality}`);
+  });
+
+  document.getElementById('sc-play').addEventListener('click', async () => {
+    stopEverything();
+    await initSynth();
+    activePlayer = new PatternPlayer({ guitarSampler: synth, bpm: +document.getElementById('sc-bpm').value });
+    activePlayer.on('chord',   ({ root, quality, shape, barFret }) => scLog(`chord: ${root} ${quality} ${shape}-tvar @ ${barFret}. pražec`));
+    activePlayer.on('pattern', ({ loopLen, resolution }) => scLog(`pattern: ${loopLen} kroků, ${resolution}`));
+    activePlayer.on('start',   () => scLog('start'));
+    activePlayer.on('loop',    () => scLog('loop'));
+    activePlayer.on('note',    ({ notes, vel }) => scLog(`note: ${notes.slice(0,3).join(',')}${notes.length>3?'…':''} vel=${vel.toFixed(2)}`));
+    activePlayer.on('stop',    () => scLog('stop'));
+    const [root, quality] = document.getElementById('sc-chord').value.split(':');
+    activePlayer.setChord({ root, quality });
+    activePlayer.loadPattern(scPattern);
+    activePlayer.play();
+    document.getElementById('sc-play').disabled = true;
+    document.getElementById('sc-stop').disabled = false;
+  });
+  document.getElementById('sc-stop').addEventListener('click', stopEverything);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Sequence demo (kapitola 5)
+  // ═════════════════════════════════════════════════════════════════════════
+  const seqPattern = {
+    id: 'seq-strum',
+    loop_steps: 16,
+    resolution: '16n',
+    edit_bpm: 100,
+    meta: { style: 'strum' },
+    humanization: { strum_delay_ms: 20 },
+    steps: [
+      { beat: '1',  strings: ['bass_root', 4, 3, 2, 1], direction: 'D', vel: 0.9,  duration: '4n' },
+      { beat: '2+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6,  duration: '8n' },
+      { beat: '3',  strings: ['bass_alt',  4, 3, 2, 1], direction: 'D', vel: 0.85, duration: '4n' },
+      { beat: '4+', strings: [1, 2, 3, 4],              direction: 'U', vel: 0.6,  duration: '8n' },
+    ]
+  };
+
+  const seqLog = makeLog('seq-log');
+
+  document.getElementById('seq-play').addEventListener('click', async () => {
+    stopEverything();
+    await initSynth();
+    activePlayer = new PatternPlayer({ guitarSampler: synth, bpm: 100 });
+    activePlayer.on('seq-start', ({ chords }) => seqLog(`seq-start: ${chords.length} akordů`));
+    activePlayer.on('seq-chord', ({ chord, index }) => seqLog(`seq-chord #${index}: ${chord.root} ${chord.quality} (${chord.beats} doby)`));
+    activePlayer.on('seq-reparse', ({ chords, reason }) => seqLog(`seq-reparse${reason ? ' ('+reason+')' : ''}: ${chords.map(c=>c.root+(c.quality==='maj'?'':'m')).join(' ')}`));
+    activePlayer.on('seq-loop', () => seqLog('seq-loop'));
+    activePlayer.on('stop',    () => seqLog('stop'));
+
+    const textarea = document.getElementById('seq-text');
+    activePlayer.playSequence(textarea.value, {
+      defaultPattern: seqPattern,
+      loop: document.getElementById('seq-loop').checked,
+      getText: () => textarea.value,
+      getDefaultPattern: () => seqPattern,
+    });
+    document.getElementById('seq-play').disabled = true;
+    document.getElementById('seq-stop').disabled = false;
+  });
+  document.getElementById('seq-stop').addEventListener('click', stopEverything);
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Hot-update demo (kapitola 6)
+  // ═════════════════════════════════════════════════════════════════════════
+  const hotStrum = {
+    id: 'hot-strum',
+    loop_steps: 16,
+    resolution: '16n',
+    edit_bpm: 100,
+    meta: { style: 'strum' },
+    humanization: { strum_delay_ms: 20 },
+    steps: [
+      { beat: '1', strings: ['bass_root', 4, 3, 2, 1], direction: 'D', vel: 0.9, duration: '4n' },
+      { beat: '3', strings: ['bass_alt',  4, 3, 2, 1], direction: 'D', vel: 0.85, duration: '4n' }
+    ]
+  };
+  const hotFp32 = {
+    id: 'hot-fp',
+    loop_steps: 32,
+    resolution: '32n',
+    edit_bpm: 100,
+    meta: { style: 'fingerpick' },
+    humanization: { vel_variance: 0.08 },
+    steps: [
+      { beat: '1',   strings: ['bass_root'], vel: 0.85, duration: '4n' },
+      { beat: '1e',  strings: [3], vel: 0.7, duration: '8n' },
+      { beat: '1+',  strings: [2], vel: 0.7, duration: '8n' },
+      { beat: '1a',  strings: [1], vel: 0.7, duration: '8n' },
+      { beat: '2',   strings: ['bass_alt'], vel: 0.8, duration: '4n' },
+      { beat: '2e',  strings: [3], vel: 0.7, duration: '8n' },
+      { beat: '2+',  strings: [2], vel: 0.7, duration: '8n' },
+      { beat: '2a',  strings: [1], vel: 0.7, duration: '8n' },
+      { beat: '3',   strings: ['bass_root'], vel: 0.85, duration: '4n' },
+      { beat: '3e',  strings: [3], vel: 0.7, duration: '8n' },
+      { beat: '3+',  strings: [2], vel: 0.7, duration: '8n' },
+      { beat: '3a',  strings: [1], vel: 0.7, duration: '8n' },
+      { beat: '4',   strings: ['bass_alt'], vel: 0.8, duration: '4n' },
+      { beat: '4e',  strings: [3], vel: 0.7, duration: '8n' },
+      { beat: '4+',  strings: [2], vel: 0.7, duration: '8n' },
+      { beat: '4a',  strings: [1], vel: 0.7, duration: '8n' },
+    ]
+  };
+
+  const hotLog = makeLog('hot-log');
+  let hotCurrentIsStrum = true;
+
+  document.getElementById('hot-start').addEventListener('click', async () => {
+    stopEverything();
+    await initSynth();
+    activePlayer = new PatternPlayer({ guitarSampler: synth, bpm: 100 });
+    activePlayer.on('pattern', ({ loopLen, resolution, hot }) => hotLog(`pattern${hot?' (HOT)':''}: ${loopLen} kroků, ${resolution}`));
+    activePlayer.on('bpm', ({ bpm }) => hotLog(`bpm → ${bpm}`));
+    activePlayer.on('loop', () => hotLog('loop'));
+    activePlayer.on('stop', () => hotLog('stop'));
+    activePlayer.setChord({ root: 'C', quality: 'maj' });
+    activePlayer.loadPattern(hotStrum);
+    hotCurrentIsStrum = true;
+    activePlayer.play();
+    document.getElementById('hot-start').disabled = true;
+    document.getElementById('hot-stop').disabled = false;
+    document.getElementById('hot-swap-pat').disabled = false;
+    document.getElementById('hot-bpm-slow').disabled = false;
+    document.getElementById('hot-bpm-fast').disabled = false;
+  });
+  document.getElementById('hot-stop').addEventListener('click', stopEverything);
+
+  document.getElementById('hot-swap-pat').addEventListener('click', () => {
+    if (!activePlayer) return;
+    const next = hotCurrentIsStrum ? hotFp32 : hotStrum;
+    hotCurrentIsStrum = !hotCurrentIsStrum;
+    hotLog(`hotUpdatePattern(${next.id}) — resolution ${next.resolution}`);
+    activePlayer.hotUpdatePattern(next);
+  });
+
+  document.getElementById('hot-bpm-slow').addEventListener('click', () => {
+    if (activePlayer) activePlayer.setBpm(80);
+  });
+  document.getElementById('hot-bpm-fast').addEventListener('click', () => {
+    if (activePlayer) activePlayer.setBpm(140);
+  });
+</script>
+
+</body>
+</html>
